@@ -61,16 +61,16 @@ internal static class SummonRouting
 		{
 			return 2;
 		}
-		string text = root.name.ToLowerInvariant();
-		if (text.Contains("orbit shield") || text.Contains("dreamshield") || text.Contains("dream shield"))
+		string text = root.name;
+		if (text.IndexOf("orbit shield", StringComparison.OrdinalIgnoreCase) >= 0 || text.IndexOf("dreamshield", StringComparison.OrdinalIgnoreCase) >= 0 || text.IndexOf("dream shield", StringComparison.OrdinalIgnoreCase) >= 0)
 		{
 			return 0;
 		}
-		if (text.Contains("grimmchild") || text.Contains("grimm child"))
+		if (text.IndexOf("grimmchild", StringComparison.OrdinalIgnoreCase) >= 0 || text.IndexOf("grimm child", StringComparison.OrdinalIgnoreCase) >= 0)
 		{
 			return 1;
 		}
-		if (text.Contains("knight hatchling"))
+		if (text.IndexOf("knight hatchling", StringComparison.OrdinalIgnoreCase) >= 0)
 		{
 			return 2;
 		}
@@ -160,6 +160,7 @@ internal static class SummonRouting
 		{
 			return;
 		}
+		WeaverlingLifetime.Trim(player);
 		int num = 0;
 		using (PlayerContext.Enter(player))
 		{
@@ -227,8 +228,12 @@ internal static class SummonRouting
 				}
 			}
 		}
+		// Share discovery only during this synchronous pass. Recheck live tags
+		// below; never keep a stale world snapshot across pooling or room changes.
+		OwnerTag[] ownedSummons = null;
 		foreach (PlayerSlot p in session.Players)
 		{
+			if (p.Down || p.Retiring) WeaverlingLifetime.Trim(p);
 			if (p.Index <= 0 || !p.Hero || Time.unscaledTime < nextCheck[p.Index])
 			{
 				continue;
@@ -262,7 +267,7 @@ internal static class SummonRouting
 				{
 					manual[p.Index, m] = null;
 				}
-				if (!prefabs[m] || CountOwned(p, m) >= ((m != 2) ? 1 : 4))
+				if (!prefabs[m] || CountOwned(p, m, ref ownedSummons) >= ((m != 2) ? 1 : 4))
 				{
 					continue;
 				}
@@ -314,6 +319,9 @@ internal static class SummonRouting
 				finally
 				{
 					spawning = false;
+					// OnEnable may synchronously create other native familiars.
+					// Rediscover after a spawn rather than risk duplicate fallbacks.
+					ownedSummons = null;
 				}
 			}
 		}
@@ -331,11 +339,11 @@ internal static class SummonRouting
 		}
 	}
 
-	private static int CountOwned(PlayerSlot p, int type)
+	private static int CountOwned(PlayerSlot p, int type, ref OwnerTag[] snapshot)
 	{
 		int num = 0;
-		OwnerTag[] array = UnityEngine.Object.FindObjectsOfType<OwnerTag>();
-		foreach (OwnerTag ownerTag in array)
+		if (snapshot == null) snapshot = UnityEngine.Object.FindObjectsOfType<OwnerTag>();
+		foreach (OwnerTag ownerTag in snapshot)
 		{
 			if ((bool)ownerTag && ownerTag.Player == p && ownerTag.gameObject.activeInHierarchy && Kind(ownerTag.gameObject) == type)
 			{
@@ -371,6 +379,7 @@ internal static class SummonRouting
 
 	internal static void Reset()
 	{
+		WeaverlingLifetime.Reset();
 		for (int i = 1; i < 8; i++)
 		{
 			for (int j = 0; j < 3; j++)

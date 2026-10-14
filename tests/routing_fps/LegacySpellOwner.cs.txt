@@ -1,0 +1,61 @@
+private static void LegacyCorrectSpellOwner(CoopSession s, Attack a)
+	{
+		//Discarded unreachable code: IL_0286
+		PlayerSlot playerSlot = null;
+		float num = 6.25f;
+		foreach (PlayerSlot player in s.Players)
+		{
+			if (player.Alive && player.Ready && Time.unscaledTime - lastCast[player.Index] < 0.6f)
+			{
+				float sqrMagnitude = (player.Hero.transform.position - a.Collider.transform.position).sqrMagnitude;
+				if (sqrMagnitude < num)
+				{
+					num = sqrMagnitude;
+					playerSlot = player;
+				}
+			}
+		}
+		if (a.Kind != PvpKind.Spell || !a.Collider || a.Owner == null || !a.Owner.Hero)
+		{
+			return;
+		}
+		GameObject gameObject;
+		if (playerSlot != null && playerSlot != a.Owner && Time.unscaledTime - lastCast[a.Owner.Index] > 0.6f)
+		{
+			a.Owner = playerSlot;
+			gameObject = a.Collider.gameObject;
+			(gameObject.GetComponent<OwnerTag>() ?? gameObject.AddComponent<OwnerTag>()).Player = playerSlot;
+			s.RefreshOwnership(gameObject, playerSlot);
+			a.Swing.touched &= 536870911;
+		}
+		gameObject = a.Collider.gameObject;
+		Rigidbody2D componentInParent = gameObject.GetComponentInParent<Rigidbody2D>();
+		if (!componentInParent || (!componentInParent.gameObject.name.ToLowerInvariant().Contains("fireball") && !componentInParent.gameObject.name.ToLowerInvariant().Contains("vengeful")))
+		{
+			return;
+		}
+		int touched = a.Swing.touched;
+		float num2;
+		if (((uint)touched & 0x20000000u) != 0)
+		{
+			num2 = (((touched & 0x40000000) == 0) ? (-1f) : 1f);
+		}
+		else
+		{
+			if (a.Owner.Hero.cState.facingRight)
+			{
+				num2 = 1f;
+				touched |= 0x60000000;
+			}
+			else
+			{
+				num2 = -1f;
+				touched |= 0x20000000;
+			}
+			a.Swing.touched = touched;
+		}
+		componentInParent.velocity = new Vector2(Mathf.Abs(componentInParent.velocity.x) * num2, componentInParent.velocity.y);
+		Vector3 localScale = componentInParent.transform.localScale;
+		localScale.x = Mathf.Abs(localScale.x) * num2;
+		componentInParent.transform.localScale = localScale;
+	}

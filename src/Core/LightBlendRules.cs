@@ -1,55 +1,47 @@
+using System;
+
 namespace KO.HollowKnight8;
 
 internal static class LightBlendRules
 {
-	internal static double Weight(LightPoint[] points, int count, int index, double x, double y, double feather, double[] scratch)
-	{
-		//Discarded unreachable code: IL_000d
-		if (index == 0)
-		{
-			return 1.0;
-		}
-		int num;
-		if (!Plugin.Self.GroupDarkness.Value && Plugin.Self.GatherDistance.Value < 27.5f)
-		{
-			if (index != 0)
-			{
-				return 0.0;
-			}
-			num = 1;
-			for (int i = 1; i < count; i++)
-			{
-				double num2 = points[0].X - points[i].X;
-				double num3 = points[0].Y - points[i].Y;
-				if (num2 * num2 + num3 * num3 <= 16.0)
-				{
-					num++;
-				}
-			}
-			return 1.0 / (double)num;
-		}
-		for (int i = 0; i < index; i++)
-		{
-			double num2 = points[index].X - points[i].X;
-			double num3 = points[index].Y - points[i].Y;
-			if (num2 * num2 + num3 * num3 <= 16.0)
-			{
-				return 0.0;
-			}
-		}
-		num = 1;
-		for (int i = 0; i < count; i++)
-		{
-			if (i != index)
-			{
-				double num2 = points[index].X - points[i].X;
-				double num3 = points[index].Y - points[i].Y;
-				if (num2 * num2 + num3 * num3 <= 16.0)
-				{
-					num++;
-				}
-			}
-		}
-		return 1.0 / (double)num;
-	}
+    // Share one native glow's intensity at every sample, including P1. Do not
+    // suppress a player's whole light merely because another player is close:
+    // the ownership changes smoothly across the overlapping part of the glows.
+    internal static void Fill(LightPoint[] points, int count, double x, double y,
+        double feather, double[] weights)
+    {
+        if (count == 1)
+        {
+            weights[0] = 1.0;
+            return;
+        }
+
+        double nearest = double.MaxValue;
+        for (int i = 0; i < count; i++)
+        {
+            double dx = x - points[i].X;
+            double dy = y - points[i].Y;
+            weights[i] = dx * dx + dy * dy;
+            nearest = Math.Min(nearest, weights[i]);
+        }
+
+        double width = Math.Max(0.001, feather);
+        double band = width * (width + 2.0 * Math.Sqrt(nearest));
+        double total = 0.0;
+        for (int i = 0; i < count; i++)
+        {
+            double t = Math.Max(0.0, 1.0 - (weights[i] - nearest) / band);
+            weights[i] = t * t * (3.0 - 2.0 * t);
+            total += weights[i];
+        }
+        for (int i = 0; i < count; i++)
+            weights[i] /= total;
+    }
+
+    internal static double Weight(LightPoint[] points, int count, int index,
+        double x, double y, double feather, double[] scratch)
+    {
+        Fill(points, count, x, y, feather, scratch);
+        return scratch[index];
+    }
 }

@@ -15,6 +15,13 @@ internal static class Diagnostics
 
 	private static readonly Dictionary<string, float> nextError = new Dictionary<string, float>();
 
+	private static readonly RepeatedUnityLogs unityLogs = new RepeatedUnityLogs();
+
+	internal static void UnityLog(string message)
+	{
+		lock (Gate) unityLogs.Record(message, Time.realtimeSinceStartup, Write);
+	}
+
 	internal static string Folder { get; private set; }
 
 	internal static string CurrentFile { get; private set; }
@@ -25,6 +32,7 @@ internal static class Diagnostics
 		{
 			Folder = Path.Combine(Application.persistentDataPath, "Local8-Logs");
 			Directory.CreateDirectory(Folder);
+			unityLogs.Clear();
 			CurrentFile = Path.Combine(Folder, "Local8-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".log");
 			writer = new StreamWriter(new FileStream(CurrentFile, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
 			{
@@ -81,6 +89,25 @@ internal static class Diagnostics
 		}
 	}
 
+	internal static void ControlSnapshot(CoopSession session, string reason)
+	{
+		Write("CONTROL STATE reason=" + reason + " interaction=" + InteractionRouter.ActiveSummary);
+		foreach (PlayerSlot player in session.Players)
+		{
+			HeroController hero = player.Hero;
+			if (!hero) continue;
+			var body = hero.GetComponent<Rigidbody2D>();
+			var animation = hero.GetComponent<HeroAnimationController>();
+			Write("  P" + (player.Index + 1) + " hero=" + hero.GetInstanceID() + " pos=" + hero.transform.position
+				+ " ready=" + player.Ready + " alive=" + player.Alive + " blocked=" + player.InputBlocked
+				+ " control=" + hero.controlReqlinquished + " accepting=" + hero.acceptingInput
+				+ " animation=" + (!animation || animation.controlEnabled) + " bench=" + BenchSeats.Seated(player)
+				+ " atBench=" + player.Vitals.AtBench + " interactionHold=" + InteractionRouter.Holds(player)
+				+ " simulated=" + (body && body.simulated) + " kinematic=" + (body && body.isKinematic)
+				+ " gravity=" + (body ? body.gravityScale.ToString() : "missing"));
+		}
+	}
+
 	internal static void OpenFolder()
 	{
 		try
@@ -122,6 +149,8 @@ internal static class Diagnostics
 			if (writer != null)
 			{
 				Write("STOP");
+				unityLogs.Flush(Write);
+				unityLogs.Clear();
 				writer.Dispose();
 				writer = null;
 			}

@@ -26,6 +26,10 @@ internal static class Hud
 	private static int tab;
 
 	private static Vector2 scroll;
+	private static readonly float[] menuHeight = new float[5];
+	private static int pvpPage;
+	private static bool adventurePage;
+	private static bool addingKeyboard;
 
 	private static readonly int[] lastHealth = Enumerable.Repeat(-1, 8).ToArray();
 
@@ -124,10 +128,13 @@ internal static class Hud
 
 	internal static void ReleaseAssets()
 	{
+		PlayerProfilesUI.Reset();
 		Restore();
 		HudAssets.Release();
 		RoomWaitArt.Release();
 		MaskDisplay.Clear();
+		SoulReserveBar.Release();
+		MenuTheme.Release();
 	}
 
 	private static string Status(PlayerSlot p, Local8Runtime plugin)
@@ -148,7 +155,8 @@ internal static class Hud
 				{
 					return Charms.SanitizeLocalized("hud.down", "LOCAL8", "CAÍDO");
 				}
-				return Mathf.CeilToInt(Mathf.Max(0f, plugin.RespawnSeconds.Value - (Time.time - p.DownAt))) + "s";
+				float remaining = TimedRespawnRecovery.Remaining(p, plugin.RespawnSeconds.Value);
+				return remaining > 0f ? Mathf.CeilToInt(remaining) + "s" : Charms.SanitizeLocalized("hud.returning", "LOCAL8", "VOLVIENDO");
 			}
 			return Charms.SanitizeLocalized("hud.eliminated", "LOCAL8", "ELIMINADO");
 		}
@@ -214,6 +222,7 @@ internal static class Hud
 			if (!plugin.Panel && session.Active && session.Players.Count > 1 && (bool)instance && instance.IsGameplayScene())
 			{
 				NativeCharmCards(session, w, h, num);
+				if (Charms.NativeMenuOpen) DrawTooltip(w, h);
 			}
 			if (!plugin.Panel && session.Active && (bool)instance && instance.IsGameplayScene())
 			{
@@ -222,18 +231,7 @@ internal static class Hud
 			}
 			if (plugin.Panel)
 			{
-				if (Charms.Editing)
-				{
-					CharmPanel(plugin, w, h);
-				}
-				else
-				{
-					Panel(plugin, w, h);
-				}
-			}
-			if (plugin.Panel)
-			{
-				DrawTooltip(w, h);
+				DrawMenu(plugin, w, h);
 			}
 		}
 		finally
@@ -242,6 +240,25 @@ internal static class Hud
 		}
 		RoleUI.Draw(plugin);
 		PvpRoundClock.Draw(plugin);
+	}
+
+	private static void DrawMenu(Local8Runtime plugin, float w, float h)
+	{
+		GUISkin previousSkin=GUI.skin;
+		bool previousEnabled=GUI.enabled;Color previousColor=GUI.color;
+		GUIStyle previousText=text,previousSmall=small,previousTitle=title,previousButton=button;
+		try
+		{
+			GUI.skin=MenuTheme.Skin;
+			text=MenuTheme.Label;small=MenuTheme.Small;title=MenuTheme.Heading;button=MenuTheme.ButtonStyle;
+			if(Charms.Editing)CharmPanel(plugin,w,h);else Panel(plugin,w,h);
+			DrawTooltip(w,h);
+		}
+		finally
+		{
+			GUI.skin=previousSkin;text=previousText;small=previousSmall;title=previousTitle;button=previousButton;
+			GUI.enabled=previousEnabled;GUI.color=previousColor;
+		}
 	}
 
 	private static void DrawBasic(Local8Runtime plugin, float w)
@@ -372,7 +389,9 @@ internal static class Hud
 			}
 			if (player.Vitals.Reserve > 0)
 			{
-				Bar(new Rect(rect.x, rect.yMax + 4f * num, rect.width, 3f * num), (float)player.Vitals.Reserve / 99f, color);
+				float reserveCapacity = session.Data != null ? Mathf.Clamp01(session.Data.MPReserveMax / 99f) : 1f;
+				SoulReserveBar.Draw(new Rect(rect.x, rect.yMax + 4f * num, rect.width, 3f * num),
+					player.Vitals.Reserve / 99f, reserveCapacity, color);
 			}
 			if (player.ReviveProgress > 0f)
 			{
@@ -441,657 +460,233 @@ internal static class Hud
 		InputDevice d2 = d;
 		PlayerSlot playerSlot = s.Players.FirstOrDefault((PlayerSlot p) => p.Device == d2);
 		GUI.Label(new Rect(5f, row, cw - 230f, 26f), name + ((playerSlot != null) ? (" - P" + (playerSlot.Index + 1)) : UiLocalization.Get("common.unassigned_suffix")), small);
-		if (d != InputDevice.Null && playerSlot == null && s.Players.Count < 8 && GUI.Button(new Rect(cw - 220f, row, 105f, 29f), UiLocalization.Get("action.join"), button))
+		if (d != InputDevice.Null && playerSlot == null && s.Players.Count < 8 && MenuTheme.Button(new Rect(cw - 220f, row, 105f, 29f), UiLocalization.Get("action.join"), button))
 		{
 			s.Join(d2);
 		}
 		bool num = s.Players.Skip(1).Any((PlayerSlot p) => p.Device == d2);
-		if ((d == InputDevice.Null || !num) && GUI.Button(new Rect(cw - 110f, row, 105f, 29f), UiLocalization.Get("common.assign_p1"), button))
+		if ((d == InputDevice.Null || !num) && MenuTheme.Button(new Rect(cw - 110f, row, 105f, 29f), UiLocalization.Get("common.assign_p1"), button))
 		{
 			s.AssignPrimary(d2);
 		}
 		row += 35f;
 	}
 
+	private static void ChangeTab(int next)
+	{
+		if(tab==next)return;
+		tab=next;scroll=Vector2.zero;ActionKeys.Capturing=0;MenuInput.Waiting=false;lastTip="";
+	}
+
 	private static void Panel(Local8Runtime plugin, float w, float h)
 	{
-		CoopSession session = plugin.Session;
-		float num = Mathf.Min(840f, w - 24f);
-		float num2 = Mathf.Min(800f, h - 24f);
-		float num3 = (w - num) * 0.5f;
-		float num4 = (h - num2) * 0.5f;
-		Box(new Rect(num3, num4, num, num2), new Color(0.035f, 0.045f, 0.075f, 0.98f));
-		GUI.Label(new Rect(num3 + 20f, num4 + 15f, num - 110f, 28f), ReleaseInfo.Label, title);
-		if (GUI.Button(new Rect(num3 + num - 90f, num4 + 15f, 70f, 30f), Charms.SanitizeLocalized("common.close", "LOCAL8", "Cerrar"), button))
+		CoopSession session=plugin.Session;
+		float width=MenuLayout.Width(w),height=MenuLayout.Height(h),x=(w-width)*.5f,y=(h-height)*.5f;
+		Rect panel=new Rect(x,y,width,height);
+		Box(new Rect(0,0,w,h),new Color(.005f,.009f,.019f,.27f));
+		MenuTheme.Frame(panel);
+		MenuTheme.Centered(new Rect(x+78,y+21,width-156,32),ReleaseInfo.Name,MenuTheme.Paper,23);
+		MenuTheme.Centered(new Rect(x+78,y+56,width-156,20),ReleaseInfo.Version+"   ·   "+MenuInput.Label+UiLocalization.Get("panel.toggle_hint"),MenuTheme.Muted,12);
+		MenuTheme.HeaderArt(new Rect(x+width*.5f-180,y+73,360,42));
+		if(MenuTheme.IconButton(new Rect(x+width-65,y+24,34,34),MenuArt.Close,UiLocalization.Get("common.close")))plugin.SetPanel(false);
+		if(session.Primary==null)
 		{
-			plugin.SetPanel(open: false);
+			MenuTheme.Text(new Rect(x+35,y+135,width-70,70),UiLocalization.Get("panel.enter_game"));return;
 		}
-		GUI.Label(new Rect(num3 + 20f, num4 + 50f, num - 40f, 28f), ReleaseInfo.Name + "  /  " + MenuInput.Label + Charms.SanitizeLocalized("panel.toggle_hint", "LOCAL8", " abre y cierra el panel"), small);
-		if (session.Primary == null)
+		string[] tabs={UiLocalization.Get("tab.players"),UiLocalization.Get("tab.game"),"PvP",UiLocalization.Get("tab.settings")};
+		string[] tips={UiLocalization.Get("menu.players_tip"),UiLocalization.Get("menu.game_tip"),UiLocalization.Get("menu.pvp_tip"),UiLocalization.Get("menu.settings_tip")};
+		bool wide=MenuLayout.Wide(width);float side=MenuLayout.Sidebar(width);
+		float top=MenuLayout.BodyTop(width);
+		if(wide)
 		{
-			GUI.Label(new Rect(num3 + 20f, num4 + 112f, num - 40f, 60f), Charms.SanitizeLocalized("panel.enter_game", "LOCAL8", "Entra en una partida para configurar el grupo."), text);
-			return;
+			Box(new Rect(x+16,y+MenuLayout.Header,side-12,height-MenuLayout.Header-MenuLayout.Footer),new Color(.023f,.028f,.042f,1));
+			for(int i=0;i<tabs.Length;i++)if(MenuTheme.Nav(new Rect(x+24,y+MenuLayout.Header+14+i*65,side-28,58),tabs[i],tips[i],i,tab==i||(tab==4&&i==0)))ChangeTab(i);
+			MenuTheme.Text(new Rect(x+30,y+height-MenuLayout.Footer-94,side-36,24),UiLocalization.Get("players.title"),MenuTheme.Muted,13);
+			MenuTheme.Text(new Rect(x+30,y+height-MenuLayout.Footer-67,side-36,25),session.Players.Count+" / 8",MenuTheme.Paper,20);
+			foreach(PlayerSlot p in session.Players)MenuTheme.Mark(new Rect(x+30+p.Index*18,y+height-MenuLayout.Footer-29,12,16),p.Color);
 		}
-		string[] array = new string[4]
+		else
 		{
-			Charms.SanitizeLocalized("tab.players", "LOCAL8", "Jugadores y controles"),
-			Charms.SanitizeLocalized("tab.game", "LOCAL8", "Partida"),
-			"PvP",
-			Charms.SanitizeLocalized("tab.settings", "LOCAL8", "Ajustes")
-		};
-		float num5 = (num - 40f) / (float)array.Length;
-		for (int i = 0; i < array.Length; i++)
-		{
-			if (GUI.Button(new Rect(num3 + 20f + (float)i * num5, num4 + 86f, num5 - 4f, 33f), ((tab == i) ? "> " : "") + array[i], button) && tab != i)
-			{
-				tab = i;
-				scroll = Vector2.zero;
-			}
+			for(int i=0;i<tabs.Length;i++)if(MenuTheme.Choice(new Rect(x+24+i%2*(width-48)/2,y+MenuLayout.Header+i/2*43,(width-48)/2-5,39),new GUIContent(tabs[i],tips[i]),tab==i||(tab==4&&i==0)))ChangeTab(i);
 		}
-		InputDevice[] array2 = Controls.Devices().ToArray();
-		Rect position = new Rect(num3 + 15f, num4 + 134f, num - 30f, num2 - 207f);
-		float height = Mathf.Max(position.height - 10f, (tab == 0) ? (613 + session.Players.Count * 34 + (array2.Length + 1) * 35) : ((tab == 1) ? 575 : ((tab == 2) ? (2700 + session.Players.Count * 37) : 490)));
-		scroll = GUI.BeginScrollView(position, scroll, new Rect(0f, 0f, position.width - 20f, height));
-		float row = 0f;
-		float cw = position.width - 30f;
+		InputDevice[] devices=tab==0?Controls.Devices().ToArray():Array.Empty<InputDevice>();
+		Rect area=new Rect(x+side+24,y+top+8,width-side-46,height-top-MenuLayout.Footer-16);
+		float visible=Mathf.Max(1,area.height),content=MenuLayout.ContentHeight(menuHeight[Mathf.Clamp(tab,0,4)],visible);
+		scroll.y=MenuLayout.ClampScroll(scroll.y,content,visible);
+		scroll=GUI.BeginScrollView(area,scroll,new Rect(0,0,area.width-17,content),false,false,GUIStyle.none,GUI.skin.verticalScrollbar);
+		int drawnTab=tab;
+		float row=0,cw=area.width-24;
 		try
 		{
-			if (tab == 0)
-			{
-				PlayerOptions(plugin, session, array2, cw, ref row);
-			}
-			else if (tab == 1)
-			{
-				GameOptions(plugin, cw, ref row);
-			}
-			else if (tab == 2)
-			{
-				PvpOptions(plugin, session, cw, ref row);
-			}
-			else
-			{
-				AdvancedOptions(plugin, session, cw, ref row);
-			}
+			if(tab==0)PlayerOptions(plugin,session,devices,cw,ref row);
+			else if(tab==1)GameOptions(plugin,cw,ref row);
+			else if(tab==2)PvpOptions(plugin,session,cw,ref row);
+			else AdvancedOptions(plugin,session,cw,ref row);
+			menuHeight[Mathf.Clamp(drawnTab,0,4)]=row;
 		}
-		finally
+		finally{GUI.EndScrollView();}
+		float bottom=y+height-MenuLayout.Footer;
+		MenuTheme.Divider(new Rect(x+width*.5f-192,bottom-11,384,26));
+		float cell=(width-48)/4;
+		if(MenuTheme.Choice(new Rect(x+27.5f,bottom+14,cell-7,34),Help(MenuInput.Key==KeyCode.F9?UiLocalization.Get("action.join"):UiLocalization.Get("action.join_f9"),UiLocalization.Get("menu.join_tip")),true))session.JoinFirstAvailable();
+		if(MenuTheme.Button(new Rect(x+27.5f+cell,bottom+14,cell-7,34),Help(UiLocalization.Get("action.gather"),UiLocalization.Get("menu.gather_tip")),button))session.GatherNow();
+		if(MenuTheme.Button(new Rect(x+27.5f+cell*2,bottom+14,cell-7,34),Help(UiLocalization.Get("action.repair"),UiLocalization.Get("menu.repair_tip")),button))session.RepairPlayers();
+		bool prior=GUI.enabled;
+		try
 		{
-			GUI.EndScrollView();
+			GUI.enabled=prior&&session.Players.Count>1;
+			if(MenuTheme.Button(new Rect(x+27.5f+cell*3,bottom+14,cell-7,34),Help(UiLocalization.Get("action.remove_last"),UiLocalization.Get("menu.remove_tip")),button))session.RemoveLast();
 		}
-		float num6 = num3 + 20f;
-		float num7 = num4 + num2 - 67f;
-		float num8 = (num - 48f) / 4f;
-		if (GUI.Button(new Rect(num6, num7, num8 - 4f, 32f), (MenuInput.Key == KeyCode.F9) ? Charms.SanitizeLocalized("action.join", "LOCAL8", UiLocalization.Get("action.join")) : Charms.SanitizeLocalized("action.join_f9", "LOCAL8", "Unir (F9)"), button))
-		{
-			session.JoinFirstAvailable();
-		}
-		if (GUI.Button(new Rect(num6 + num8, num7, num8 - 4f, 32f), new GUIContent(Charms.SanitizeLocalized("action.gather", "LOCAL8", "Reunir"), Charms.SanitizeLocalized("rescue.hold", "LOCAL8", "Mantén ") + ActionKeys.ButtonLabel + UiLocalization.Get("common.keyboard_inline") + ActionKeys.RescueLabel + Charms.SanitizeLocalized("rescue.panel_tip", "LOCAL8", ") para viajar como partículas oníricas hasta otro jugador. Recarga: 25 s.")), button))
-		{
-			session.GatherNow();
-		}
-		if (GUI.Button(new Rect(num6 + 2f * num8, num7, num8 - 4f, 32f), Charms.SanitizeLocalized("action.repair", "LOCAL8", "Recuperar jugadores"), button))
-		{
-			session.RepairPlayers();
-		}
-		if (session.Players.Count > 1 && GUI.Button(new Rect(num6 + 3f * num8, num7, num8 - 4f, 32f), Charms.SanitizeLocalized("action.remove_last", "LOCAL8", "Quitar último"), button))
-		{
-			session.RemoveLast();
-		}
-		GUI.Label(new Rect(num6, num7 + 37f, num - 40f, 25f), (Time.unscaledTime < plugin.MessageUntil) ? plugin.Message : "", new GUIStyle(small)
-		{
-			wordWrap = false,
-			clipping = TextClipping.Clip
-		});
+		finally{GUI.enabled=prior;}
+		MenuTheme.Centered(new Rect(x+76,bottom+55,width-152,26),Time.unscaledTime<plugin.MessageUntil?plugin.Message:UiLocalization.Get("menu.hover_hint"),MenuTheme.Muted,13);
 	}
 
-	private static void PlayerOptions(Local8Runtime plugin, CoopSession s, InputDevice[] devices, float cw, ref float row)
+	private static void PlayerOptions(Local8Runtime plugin,CoopSession s,InputDevice[] devices,float cw,ref float row)
 	{
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("players.title", "LOCAL8", "JUGADORES"), title);
-		row += 32f;
-		foreach (PlayerSlot player in s.Players)
+		MenuTheme.Section(UiLocalization.Get("players.title"),cw,ref row,0);
+		int columns=cw>=470?2:1;float cell=(cw-10)/columns;int n=0;
+		foreach(PlayerSlot player in s.Players)
 		{
-			if (GUI.Button(new Rect(5f, row, 58f, 29f), ((selected == player.Index) ? "> " : "") + "P" + (player.Index + 1), button))
-			{
-				selected = player.Index;
-			}
-			GUI.Label(new Rect(75f, row + 4f, cw - 85f, 26f), player.DeviceName + (player.Connected ? "" : Charms.SanitizeLocalized("players.disconnected", "LOCAL8", " (desconectado)")) + " / " + SkinBridge.Display(player), new GUIStyle(text)
-			{
-				normal = 
-				{
-					textColor = player.Color
-				}
-			});
-			row += 34f;
+			Rect card=new Rect(8.5f+n%columns*cell,row+n/columns*85,cell-7,76);
+			if(MenuTheme.Card(card,Help("",UiLocalization.Get("menu.customize_tip")),selected==player.Index,player.Color))selected=player.Index;
+			MenuTheme.DeviceGlyph(new Rect(card.x+12,card.y+26,24,24),Controls.IsKeyboard(player.Device),player.Color);
+			MenuTheme.Text(new Rect(card.x+44,card.y+12,42,24),"P"+(player.Index+1),player.Color,20);
+			MenuTheme.Text(new Rect(card.x+91,card.y+12,card.width-106,24),string.IsNullOrEmpty(player.ProfileId)?player.DeviceName:PlayerProfiles.Display(player),MenuTheme.Paper,14);
+			string detail=player.Connected?SkinBridge.Display(player):UiLocalization.Get("players.disconnected").Trim();
+			MenuTheme.Text(new Rect(card.x+44,card.y+41,card.width-59,20),detail,MenuTheme.Muted,12);n++;
 		}
-		row += 10f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("keyboard.section", "LOCAL8", "JUGADORES CON TECLADO"), title);
-		row += 32f;
-		DeviceRow(s, InputDevice.Null, Charms.SanitizeLocalized("keyboard.shared", "LOCAL8", "Teclado compartido · máx. 4 "), cw, ref row);
-		foreach (InputDevice d in devices)
+		row+=Mathf.CeilToInt(n/(float)columns)*85+4;
+		selected=Mathf.Clamp(selected,0,s.Players.Count-1);PlayerSlot p=s.Players[selected];
+		MenuTheme.Section(UiLocalization.Get("appearance.player")+(selected+1),cw,ref row);
+		MenuTheme.Text(new Rect(5,row,120,26),UiLocalization.Get("common.color"),MenuTheme.Muted,14);
+		float swatch=Mathf.Min(31,(cw-130)/palette.Length);
+		for(int i=0;i<palette.Length;i++)
 		{
-			DeviceRow(s, d, Controls.Label(d), cw, ref row);
+			Rect r=new Rect(130+i*swatch,row,swatch-4,25);Box(r,palette[i]);
+			if(MenuTheme.Button(r,Help("",UiLocalization.Get("common.color")),GUIStyle.none)){p.Color=palette[i];Local8Mod.Settings.Colors[selected]=ColorUtility.ToHtmlStringRGB(p.Color);}
+			if(ColorUtility.ToHtmlStringRGB(p.Color)==ColorUtility.ToHtmlStringRGB(palette[i]))MenuArt.Nine(new Rect(r.x-3,r.y-3,r.width+6,r.height+6),MenuArt.Selection,Color.white);
 		}
-		GUI.Label(new Rect(5f, row, cw, 28f), "vJoy: " + Controls.VirtualCount + Charms.SanitizeLocalized("vjoy.detected_hint", "LOCAL8", " detectado(s). Puedes buscar más en Ajustes."), small);
-		row += 42f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 31f), Charms.SanitizeLocalized("keyboard.add", "LOCAL8", "Añadir jugador con teclado"), button))
+		row+=35;
+		for(int i=0;i<3;i++)
 		{
-			tab = 4;
-			scroll = Vector2.zero;
+			float value=i==0?p.Color.r:i==1?p.Color.g:p.Color.b;
+			Color channel=i==0?new Color(.95f,.48f,.50f):i==1?new Color(.48f,.86f,.59f):new Color(.47f,.65f,.97f);
+            MenuTheme.Text(new Rect(5,row,26,24),i==0?"R":i==1?"G":"B",channel,13);
+            float next=MenuTheme.Slider(new Rect(40,row+3,cw-103,24),value,0,1,channel);
+			MenuTheme.Text(new Rect(cw-52,row,47,24),Mathf.RoundToInt(next*255).ToString(),MenuTheme.Muted,13);
+			if(Mathf.Abs(next-value)>.001f){Color c=p.Color;if(i==0)c.r=next;else if(i==1)c.g=next;else c.b=next;p.Color=c;Local8Mod.Settings.Colors[selected]=ColorUtility.ToHtmlStringRGB(c);}
+			row+=25;
 		}
-		row += 43f;
-		selected = Mathf.Clamp(selected, 0, s.Players.Count - 1);
-		PlayerSlot playerSlot = s.Players[selected];
-		GUI.Label(new Rect(5f, row, cw, 27f), Charms.SanitizeLocalized("appearance.player", "LOCAL8", "PERSONALIZACIÓN P") + (selected + 1), title);
-		row += 34f;
-		GUI.Label(new Rect(5f, row, 145f, 24f), Charms.SanitizeLocalized("common.color", "LOCAL8", "Color"), small);
-		float num = Mathf.Min(28f, (cw - 155f) / (float)palette.Length);
-		for (int j = 0; j < palette.Length; j++)
-		{
-			Rect rect = new Rect(155f + (float)j * num, row, num - 3f, 25f);
-			Box(rect, palette[j]);
-			if (GUI.Button(rect, "", GUIStyle.none))
-			{
-				playerSlot.Color = palette[j];
-				Local8Mod.Settings.Colors[selected] = ColorUtility.ToHtmlStringRGB(palette[j]);
-			}
-		}
-		row += 35f;
-		string[] array = new string[3] { "R", "G", "B" };
-		for (int k = 0; k < 3; k++)
-		{
-			GUI.Label(new Rect(5f, row + 4f, 30f, 22f), array[k], small);
-			float num2 = k switch
-			{
-				1 => playerSlot.Color.g, 
-				0 => playerSlot.Color.r, 
-				_ => playerSlot.Color.b, 
-			};
-			float num3 = GUI.HorizontalSlider(new Rect(42f, row + 6f, cw - 160f, 18f), num2, 0f, 1f);
-			GUI.Label(new Rect(cw - 100f, row, 95f, 23f), Mathf.RoundToInt(num3 * 255f).ToString(), small);
-			if (Mathf.Abs(num3 - num2) > 0.001f)
-			{
-				Color color = playerSlot.Color;
-				switch (k)
-				{
-				case 0:
-					color.r = num3;
-					break;
-				case 1:
-					color.g = num3;
-					break;
-				default:
-					color.b = num3;
-					break;
-				}
-				playerSlot.Color = color;
-				Local8Mod.Settings.Colors[selected] = ColorUtility.ToHtmlStringRGB(color);
-			}
-			row += 26f;
-		}
-		row += 8f;
-		GUI.Label(new Rect(5f, row, 145f, 24f), Charms.SanitizeLocalized("common.skin", "LOCAL8", "Skin"), small);
-		if (GUI.Button(new Rect(155f, row, 35f, 29f), "<", button))
-		{
-			SkinBridge.Cycle(playerSlot, -1);
-		}
-		GUI.Label(new Rect(200f, row, cw - 320f, 26f), SkinBridge.Display(playerSlot), small);
-		if (GUI.Button(new Rect(cw - 105f, row, 100f, 29f), Charms.SanitizeLocalized("common.next", "LOCAL8", "Siguiente"), button))
-		{
-			SkinBridge.Cycle(playerSlot, 1);
-		}
-		row += 44f;
-		if (GUI.Button(new Rect(5f, row, cw * 0.48f, 31f), Charms.SanitizeLocalized("charms.player", "LOCAL8", "Amuletos P") + (selected + 1), button))
-		{
-			Charms.Open(playerSlot);
-		}
-		if (GUI.Button(new Rect(cw * 0.51f, row, cw * 0.48f, 31f), Charms.SanitizeLocalized("labels.prefix", "LOCAL8", "Etiquetas: ") + (plugin.ShowLabels.Value ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), button))
-		{
-			plugin.ShowLabels.Value = !plugin.ShowLabels.Value;
-		}
-		row += 39f;
-		if (GUI.Button(new Rect(5f, row, cw * 0.55f, 31f), Charms.SanitizeLocalized("interface.prefix", "LOCAL8", "Interfaz: ") + (plugin.BasicHud.Value ? Charms.SanitizeLocalized("hud.basic", "LOCAL8", "BÁSICA") : Charms.SanitizeLocalized("hud.full", "LOCAL8", "MÁSCARAS Y ALMA")), button))
-		{
-			plugin.BasicHud.Value = !plugin.BasicHud.Value;
-		}
-		if (GUI.Button(new Rect(cw - 145f, row, 32f, 31f), "-", button))
-		{
-			plugin.HudScale.Value = Mathf.Max(0.7f, plugin.HudScale.Value - 0.1f);
-		}
-		GUI.Label(new Rect(cw - 110f, row + 5f, 75f, 24f), Mathf.RoundToInt(plugin.HudScale.Value * 100f) + "%", small);
-		if (GUI.Button(new Rect(cw - 35f, row, 32f, 31f), "+", button))
-		{
-			plugin.HudScale.Value = Mathf.Min(1.5f, plugin.HudScale.Value + 0.1f);
-		}
+		row+=5;
+		MenuTheme.Text(new Rect(5,row,105,30),UiLocalization.Get("common.skin"),MenuTheme.Muted,14);
+		if(MenuTheme.IconButton(new Rect(115,row,36,30),MenuArt.Arrow,UiLocalization.Get("common.skin"),true))SkinBridge.Cycle(p,-1);
+		MenuTheme.Text(new Rect(160,row,cw-210,30),SkinBridge.Display(p),MenuTheme.Paper,15);
+		if(MenuTheme.IconButton(new Rect(cw-43,row,36,30),MenuArt.Arrow,UiLocalization.Get("common.skin")))SkinBridge.Cycle(p,1);
+		row+=42;
+		if(MenuTheme.Button(new Rect(5,row,cw*.49f-8,35),UiLocalization.Get("charms.player")+(selected+1),button))Charms.Open(p);
+		if(p.Index>0&&Controls.IsKeyboard(p.Device)&&MenuTheme.Button(new Rect(cw*.5f,row,cw*.49f,35),UiLocalization.Get("menu.controls"),button)){addingKeyboard=false;ChangeTab(4);}
+		row+=45;
+		PlayerProfilesUI.Draw(s,p,cw,ref row);
+		MenuTheme.Section(UiLocalization.Get("menu.devices"),cw,ref row);
+		DeviceRow(s,InputDevice.Null,UiLocalization.Get("keyboard.shared"),cw,ref row);
+		foreach(InputDevice device in devices)DeviceRow(s,device,Controls.Label(device),cw,ref row);
+		if(MenuTheme.Button(new Rect(5,row,cw-10,34),UiLocalization.Get("keyboard.add"),button)){addingKeyboard=true;ChangeTab(4);}
+		row+=43;
+		MenuTheme.Section(UiLocalization.Get("menu.display"),cw,ref row);
+		if(MenuTheme.Toggle(new Rect(5,row,cw-10,38),UiLocalization.Get("labels.prefix"),plugin.ShowLabels.Value))plugin.ShowLabels.Value=!plugin.ShowLabels.Value;
+		row+=46;
+		if(MenuTheme.Button(new Rect(5,row,cw-10,35),UiLocalization.Get("interface.prefix")+UiLocalization.Get(plugin.BasicHud.Value?"hud.basic":"hud.full"),button))plugin.BasicHud.Value=!plugin.BasicHud.Value;
+		row+=42;
+		MenuTheme.Text(new Rect(5,row,cw-240,34),UiLocalization.Get("menu.hud_scale"),MenuTheme.Muted,14);
+		if(MenuTheme.Step(new Rect(cw-228,row,65,34),false))plugin.HudScale.Value=Mathf.Max(.7f,plugin.HudScale.Value-.1f);
+		MenuTheme.Centered(new Rect(cw-153,row,70,34),Mathf.RoundToInt(plugin.HudScale.Value*100)+"%",MenuTheme.Paper,15);
+		if(MenuTheme.Step(new Rect(cw-73,row,65,34),true))plugin.HudScale.Value=Mathf.Min(1.5f,plugin.HudScale.Value+.1f);
+		row+=42;
 	}
 
-	private static void GameOptions(Local8Runtime plugin, float cw, ref float row)
+	private static void KeyboardOptions(Local8Runtime plugin,float cw,ref float row)
 	{
-		if (tab == 4)
+		CoopSession s=plugin.Session;
+		if(!addingKeyboard&&selected>=1&&selected<s.Players.Count&&Controls.IsKeyboard(s.Players[selected].Device)&&s.Players[selected].Actions!=null)
 		{
-			if (selected >= 1 && plugin.Session.Players.Count > selected && Controls.IsKeyboard(plugin.Session.Players[selected].Device) && plugin.Session.Players[selected].Actions != null)
+			PlayerSlot p=s.Players[selected];
+			MenuTheme.Section("P"+(p.Index+1)+"  ·  "+UiLocalization.Get("menu.controls"),cw,ref row,0);
+			KeyboardWarning.Draw(cw,ref row);
+			MenuTheme.Text(new Rect(5,row,cw-10,44),UiLocalization.Get("bind.help"),MenuTheme.Muted,14);row+=52;
+			var a=p.Actions;
+			PlayerAction[] actions={a.up,a.down,a.left,a.right,a.jump,a.attack,a.dash,a.cast,a.focus,a.dreamNail,a.superDash,a.quickMap,a.paneRight};
+			string[] names={"up","down","left","right","jump","attack","dash","cast","focus","dreamnail","superdash","map","rescue"};
+			int columns=cw>=470?2:1;float cell=(cw-10)/columns;
+			for(int i=0;i<actions.Length;i++)
 			{
-				GUI.Label(new Rect(5f, row, cw * 0.98f, 29f), Charms.SanitizeLocalized("keyboard.new_title", "LOCAL8", "NUEVO JUGADOR: TECLADO"), title);
-				row += 36f;
-				KeyboardWarning.Draw(cw, ref row);
-				GUI.Label(new Rect(5f, row, cw * 0.98f, 24f), Charms.SanitizeLocalized("bind.help", "LOCAL8", "Selecciona una acción y pulsa la tecla o botón que quieras usar."), small);
-				row += 34f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.up.Name, text);
-				Rect position = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj;
-				if (ActionKeys.Capturing == 10)
-				{
-					obj = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator = plugin.Session.Players[selected].Actions.up.Bindings.GetEnumerator();
-					obj = ((!enumerator.MoveNext()) ? "-" : enumerator.Current.Name);
-				}
-				if (GUI.Button(position, (string)obj, button))
-				{
-					ActionKeys.Capturing = 10;
-				}
-				GUI.Label(new Rect(cw * 0.52f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.left.Name, text);
-				Rect position2 = new Rect(cw * 0.73f, row, cw * 0.25f, 29f);
-				object obj2;
-				if (ActionKeys.Capturing == 12)
-				{
-					obj2 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator2 = plugin.Session.Players[selected].Actions.left.Bindings.GetEnumerator();
-					obj2 = ((!enumerator2.MoveNext()) ? "-" : enumerator2.Current.Name);
-				}
-				if (GUI.Button(position2, (string)obj2, button))
-				{
-					ActionKeys.Capturing = 12;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.down.Name, text);
-				Rect position3 = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj3;
-				if (ActionKeys.Capturing == 11)
-				{
-					obj3 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator3 = plugin.Session.Players[selected].Actions.down.Bindings.GetEnumerator();
-					obj3 = ((!enumerator3.MoveNext()) ? "-" : enumerator3.Current.Name);
-				}
-				if (GUI.Button(position3, (string)obj3, button))
-				{
-					ActionKeys.Capturing = 11;
-				}
-				GUI.Label(new Rect(cw * 0.52f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.right.Name, text);
-				Rect position4 = new Rect(cw * 0.73f, row, cw * 0.25f, 29f);
-				object obj4;
-				if (ActionKeys.Capturing == 13)
-				{
-					obj4 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator4 = plugin.Session.Players[selected].Actions.right.Bindings.GetEnumerator();
-					obj4 = ((!enumerator4.MoveNext()) ? "-" : enumerator4.Current.Name);
-				}
-				if (GUI.Button(position4, (string)obj4, button))
-				{
-					ActionKeys.Capturing = 13;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.jump.Name, text);
-				Rect position5 = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj5;
-				if (ActionKeys.Capturing == 14)
-				{
-					obj5 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator5 = plugin.Session.Players[selected].Actions.jump.Bindings.GetEnumerator();
-					obj5 = ((!enumerator5.MoveNext()) ? "-" : enumerator5.Current.Name);
-				}
-				if (GUI.Button(position5, (string)obj5, button))
-				{
-					ActionKeys.Capturing = 14;
-				}
-				GUI.Label(new Rect(cw * 0.52f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.quickMap.Name, text);
-				Rect position6 = new Rect(cw * 0.73f, row, cw * 0.25f, 29f);
-				object obj6;
-				if (ActionKeys.Capturing == 21)
-				{
-					obj6 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator6 = plugin.Session.Players[selected].Actions.quickMap.Bindings.GetEnumerator();
-					obj6 = ((!enumerator6.MoveNext()) ? "-" : enumerator6.Current.Name);
-				}
-				if (GUI.Button(position6, (string)obj6, button))
-				{
-					ActionKeys.Capturing = 21;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.attack.Name, text);
-				Rect position7 = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj7;
-				if (ActionKeys.Capturing == 15)
-				{
-					obj7 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator7 = plugin.Session.Players[selected].Actions.attack.Bindings.GetEnumerator();
-					obj7 = ((!enumerator7.MoveNext()) ? "-" : enumerator7.Current.Name);
-				}
-				if (GUI.Button(position7, (string)obj7, button))
-				{
-					ActionKeys.Capturing = 15;
-				}
-				GUI.Label(new Rect(cw * 0.52f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.superDash.Name, text);
-				Rect position8 = new Rect(cw * 0.73f, row, cw * 0.25f, 29f);
-				object obj8;
-				if (ActionKeys.Capturing == 20)
-				{
-					obj8 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator8 = plugin.Session.Players[selected].Actions.superDash.Bindings.GetEnumerator();
-					obj8 = ((!enumerator8.MoveNext()) ? "-" : enumerator8.Current.Name);
-				}
-				if (GUI.Button(position8, (string)obj8, button))
-				{
-					ActionKeys.Capturing = 20;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.dash.Name, text);
-				Rect position9 = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj9;
-				if (ActionKeys.Capturing == 16)
-				{
-					obj9 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator9 = plugin.Session.Players[selected].Actions.dash.Bindings.GetEnumerator();
-					obj9 = ((!enumerator9.MoveNext()) ? "-" : enumerator9.Current.Name);
-				}
-				if (GUI.Button(position9, (string)obj9, button))
-				{
-					ActionKeys.Capturing = 16;
-				}
-				GUI.Label(new Rect(cw * 0.52f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.dreamNail.Name, text);
-				Rect position10 = new Rect(cw * 0.73f, row, cw * 0.25f, 29f);
-				object obj10;
-				if (ActionKeys.Capturing == 19)
-				{
-					obj10 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator10 = plugin.Session.Players[selected].Actions.dreamNail.Bindings.GetEnumerator();
-					obj10 = ((!enumerator10.MoveNext()) ? "-" : enumerator10.Current.Name);
-				}
-				if (GUI.Button(position10, (string)obj10, button))
-				{
-					ActionKeys.Capturing = 19;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.cast.Name, text);
-				Rect position11 = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj11;
-				if (ActionKeys.Capturing == 17)
-				{
-					obj11 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator11 = plugin.Session.Players[selected].Actions.cast.Bindings.GetEnumerator();
-					obj11 = ((!enumerator11.MoveNext()) ? "-" : enumerator11.Current.Name);
-				}
-				if (GUI.Button(position11, (string)obj11, button))
-				{
-					ActionKeys.Capturing = 17;
-				}
-				GUI.Label(new Rect(cw * 0.52f, row, cw * 0.2f, 29f), plugin.Session.Players[selected].Actions.focus.Name, text);
-				Rect position12 = new Rect(cw * 0.73f, row, cw * 0.25f, 29f);
-				object obj12;
-				if (ActionKeys.Capturing == 18)
-				{
-					obj12 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator12 = plugin.Session.Players[selected].Actions.focus.Bindings.GetEnumerator();
-					obj12 = ((!enumerator12.MoveNext()) ? "-" : enumerator12.Current.Name);
-				}
-				if (GUI.Button(position12, (string)obj12, button))
-				{
-					ActionKeys.Capturing = 18;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.2f, 29f), Charms.SanitizeLocalized("rescue.title", "LOCAL8", "RESCATE ONÍRICO"), text);
-				Rect position13 = new Rect(cw * 0.22f, row, cw * 0.25f, 29f);
-				object obj13;
-				if (ActionKeys.Capturing == 22)
-				{
-					obj13 = Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar");
-				}
-				else
-				{
-					IEnumerator<BindingSource> enumerator13 = plugin.Session.Players[selected].Actions.paneRight.Bindings.GetEnumerator();
-					obj13 = ((!enumerator13.MoveNext()) ? "-" : enumerator13.Current.Name);
-				}
-				if (GUI.Button(position13, (string)obj13, button))
-				{
-					ActionKeys.Capturing = 22;
-				}
-				row += 36f;
-				GUI.Label(new Rect(5f, row, cw * 0.98f, 24f), Charms.SanitizeLocalized("rescue.tip", "LOCAL8", "Mantén la tecla para viajar como partículas oníricas hacia un compañero. Recarga: 25 s."), small);
-				row += 32f;
-				if (GUI.Button(new Rect(5f, row, cw * 0.48f, 31f), Charms.SanitizeLocalized("common.reset", "LOCAL8", "Restablecer"), button))
-				{
-					ActionKeys.Capturing = 0;
-					Controls.Dispose(plugin.Session.Players[selected]);
-					Controls.InitSecondary(plugin.Session.Players[selected], plugin.Session.Players[0].Actions, InputDevice.Null);
-				}
-				if (GUI.Button(new Rect(cw * 0.51f, row, cw * 0.47f, 31f), Charms.SanitizeLocalized("common.back", "LOCAL8", UiLocalization.Get("common.back")), button))
-				{
-					ActionKeys.Capturing = 0;
-					selected = 0;
-					tab = 0;
-					scroll = Vector2.zero;
-				}
-				return;
+				float x=5+(i%columns)*cell,top=row+(i/columns)*65;
+				MenuTheme.Text(new Rect(x,top,cell-9,23),UiLocalization.Get("menu.bind."+names[i]),MenuTheme.Paper,14);
+				string key=ActionKeys.Capturing==i+10?UiLocalization.Get("bind.capture_short"):actions[i].Bindings.Count>0?actions[i].Bindings[0].Name:"-";
+				if(MenuTheme.Choice(new Rect(x,top+24,cell-9,33),Help(key,UiLocalization.Get("bind.capture")),ActionKeys.Capturing==i+10)){ActionKeys.Capturing=i+10;MenuInput.Waiting=false;}
 			}
-			GUI.Label(new Rect(5f, row, cw - 10f, 29f), Charms.SanitizeLocalized("keyboard.new_title", "LOCAL8", "NUEVO JUGADOR: TECLADO"), title);
-			row += 36f;
-			KeyboardWarning.Draw(cw, ref row);
-			GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized("keyboard.new_intro", "LOCAL8", "Configura los controles del nuevo jugador."), small);
-			row += 31f;
-			int num = 0;
-			if (plugin.Session.Players.Count > 0)
+			row+=Mathf.CeilToInt(actions.Length/(float)columns)*65+8;
+			if(MenuTheme.Button(new Rect(5,row,cw*.49f-7,34),UiLocalization.Get("common.reset"),button))
 			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[0].Device) ? 1 : 0);
+				ActionKeys.Capturing=0;
+				Controls.Dispose(p);Controls.InitSecondary(p,s.Players[0].Actions,InputDevice.Null);
 			}
-			if (plugin.Session.Players.Count > 1)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[1].Device) ? 1 : 0);
-			}
-			if (plugin.Session.Players.Count > 2)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[2].Device) ? 1 : 0);
-			}
-			if (plugin.Session.Players.Count > 3)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[3].Device) ? 1 : 0);
-			}
-			if (plugin.Session.Players.Count > 4)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[4].Device) ? 1 : 0);
-			}
-			if (plugin.Session.Players.Count > 5)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[5].Device) ? 1 : 0);
-			}
-			if (plugin.Session.Players.Count > 6)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[6].Device) ? 1 : 0);
-			}
-			if (plugin.Session.Players.Count > 7)
-			{
-				num += (Controls.IsKeyboard(plugin.Session.Players[7].Device) ? 1 : 0);
-			}
-			int num2 = num;
-			switch (num2)
-			{
-			case 0:
-				GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("PERFIL 1  WASD | ESPACIO salto | Q ataque | E dash", "LOCAL8", "PERFIL 1  WASD | ESPACIO salto | Q ataque | E dash"), text);
-				row += 32f;
-				GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized("C hechizo | X focus | Z rápido | 1 onírico | 2 superdash", "LOCAL8", "C hechizo | X focus | Z rápido | 1 onírico | 2 superdash"), small);
-				row += 31f;
-				break;
-			case 1:
-				GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("PERFIL 2  TEGH | V salto | Y ataque | B dash", "LOCAL8", "PERFIL 2  TEGH | V salto | Y ataque | B dash"), text);
-				row += 32f;
-				GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized("N hechizo | 7 focus | 5 rápido | R onírico | 3 superdash", "LOCAL8", "N hechizo | 7 focus | 5 rápido | R onírico | 3 superdash"), small);
-				row += 31f;
-				break;
-			case 2:
-				GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("PERFIL 3  WJKL | M salto | O ataque | , dash", "LOCAL8", "PERFIL 3  WJKL | M salto | O ataque | , dash"), text);
-				row += 32f;
-				GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized(". hechizo | U focus | 0 rápido | P onírico | / superdash", "LOCAL8", ". hechizo | U focus | 0 rápido | P onírico | / superdash"), small);
-				row += 31f;
-				break;
-			case 3:
-				GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("PERFIL 4  NUM 8456 | NUM0 salto | NUM7 ataque | NUM9 dash", "LOCAL8", "PERFIL 4  NUM 8456 | NUM0 salto | NUM7 ataque | NUM9 dash"), text);
-				row += 32f;
-				GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized("NUM1 hechizo | NUM+ focus | NUM* rápido | NUM3 onírico | NUM2 superdash", "LOCAL8", "NUM1 hechizo | NUM+ focus | NUM* rápido | NUM3 onírico | NUM2 superdash"), small);
-				row += 31f;
-				break;
-			default:
-				GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("keyboard.limit", "LOCAL8", "Máximo: 4 jugadores con teclado."), text);
-				row += 32f;
-				break;
-			}
-			GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("keyboard.p1", "LOCAL8", "P1 mantiene los controles configurados en Hollow Knight."), small);
-			row += 32f;
-			GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("keyboard.controllers", "LOCAL8", "Los mandos mantienen sus controles habituales."), small);
-			row += 32f;
-			GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized("keyboard.mouse", "LOCAL8", "El ratón sigue reservado para P1."), small);
-			row += 31f;
-			GUI.Label(new Rect(5f, row, cw - 10f, 24f), Charms.SanitizeLocalized("bind.help", "LOCAL8", "Selecciona una acción y pulsa la tecla o botón que quieras usar."), small);
-			row += 31f;
-			if (num2 < 4)
-			{
-				if (plugin.Session.Players.Count < 8)
-				{
-					if (GUI.Button(new Rect(5f, row, cw - 10f, 31f), Charms.SanitizeLocalized("keyboard.add_now", "LOCAL8", "Añadir jugador"), button))
-					{
-						if (plugin.Session.CanJoin)
-						{
-							plugin.Session.Join(InputDevice.Null);
-							selected = plugin.Session.Players.Count - 1;
-							scroll = Vector2.zero;
-						}
-						else
-						{
-							GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("keyboard.wait", "LOCAL8", "Espera a que termine la carga o la cinemática."), text);
-							row += 32f;
-						}
-					}
-				}
-				else
-				{
-					GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("group.full", "LOCAL8", "El grupo ya tiene 8 jugadores."), text);
-					row += 32f;
-				}
-			}
-			else
-			{
-				GUI.Label(new Rect(5f, row, cw - 10f, 25f), Charms.SanitizeLocalized("keyboard.limit", "LOCAL8", "Máximo: 4 jugadores con teclado."), text);
-				row += 32f;
-			}
-			row += 39f;
-			if (GUI.Button(new Rect(5f, row, cw - 10f, 31f), Charms.SanitizeLocalized("common.cancel", "LOCAL8", "Cancelar"), button))
-			{
-				tab = 0;
-				scroll = Vector2.zero;
-			}
-			return;
+			if(MenuTheme.Button(new Rect(cw*.5f,row,cw*.49f,34),UiLocalization.Get("common.back"),button))ChangeTab(0);
+			row+=43;return;
 		}
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("difficulty.title", "LOCAL8", "DIFICULTAD"), title);
-		row += 34f;
-		string[] array = new string[4]
+		MenuTheme.Section(UiLocalization.Get("keyboard.new_title"),cw,ref row,0);
+		KeyboardWarning.Draw(cw,ref row);
+		int count=s.Players.Count(p=>Controls.IsKeyboard(p.Device));
+		MenuTheme.Text(new Rect(5,row,cw-10,40),UiLocalization.Get("keyboard.new_intro"),MenuTheme.Paper,15);row+=48;
+		MenuTheme.Text(new Rect(5,row,cw-10,54),UiLocalization.Get("bind.help"),MenuTheme.Muted,14);row+=62;
+		MenuTheme.Text(new Rect(5,row,cw-10,38),UiLocalization.Get("keyboard.p1"),MenuTheme.Muted,14);row+=43;
+		MenuTheme.Text(new Rect(5,row,cw-10,38),UiLocalization.Get("keyboard.controllers"),MenuTheme.Muted,14);row+=43;
+		MenuTheme.Text(new Rect(5,row,cw-10,38),UiLocalization.Get("keyboard.mouse"),MenuTheme.Muted,14);row+=51;
+		bool enabled=GUI.enabled;
+		try
 		{
-			Charms.SanitizeLocalized("difficulty.easy", "LOCAL8", "Fácil · 45%"),
-			Charms.SanitizeLocalized("difficulty.normal", "LOCAL8", "Normal · 65%"),
-			Charms.SanitizeLocalized("difficulty.hard", "LOCAL8", "Difícil · 85%"),
-			Charms.SanitizeLocalized("difficulty.extreme", "LOCAL8", "Extremo · 100%")
-		};
-		float num3 = (cw - 10f) / 4f;
-		for (int num2 = 0; num2 < 4; num2++)
-		{
-			if (GUI.Button(new Rect(5f + (float)num2 * num3, row, num3 - 5f, 34f), Help(((plugin.Difficulty.Value == num2) ? "> " : "") + array[num2], Charms.SanitizeLocalized("difficulty.tip", "LOCAL8", "Escalado por jugador vivo adicional: Fácil 45%, Normal 65%, Difícil 85%, Extremo 100%.")), button))
+			GUI.enabled=enabled&&count<4&&s.Players.Count<8;
+			if(MenuTheme.Choice(new Rect(5,row,cw-10,38),new GUIContent(UiLocalization.Get("keyboard.add_now")),true))
 			{
-				plugin.Difficulty.Value = num2;
+				if(s.CanJoin){s.Join(InputDevice.Null);selected=s.Players.Count-1;addingKeyboard=false;scroll=Vector2.zero;}
+				else plugin.Notice(UiLocalization.Get("keyboard.wait"));
 			}
 		}
-		row += 53f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("camera.title", "LOCAL8", "CÁMARA"), title);
-		row += 34f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 35f), Help(Charms.SanitizeLocalized("camera.shared", "LOCAL8", "Cámara compartida: ") + (plugin.ZoomByPlayerCount.Value ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("camera.tip", "LOCAL8", "Ajusta el zoom para mantener a todos los jugadores dentro de la pantalla.")), button))
-		{
-			plugin.ZoomByPlayerCount.Value = !plugin.ZoomByPlayerCount.Value;
-		}
-		row += 42f;
-		GUI.Label(new Rect(5f, row + 5f, cw - 160f, 27f), Charms.SanitizeLocalized("camera.margin", "LOCAL8", "Margen lateral: ") + plugin.SideMargin.Value.ToString("0.0"), small);
-		if (GUI.Button(new Rect(cw - 145f, row, 65f, 31f), "-", button))
-		{
-			plugin.SideMargin.Value = Mathf.Max(2.8f, plugin.SideMargin.Value - 0.5f);
-		}
-		if (GUI.Button(new Rect(cw - 70f, row, 65f, 31f), "+", button))
-		{
-			plugin.SideMargin.Value = Mathf.Min(10f, plugin.SideMargin.Value + 0.5f);
-		}
-		row += 43f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 35f), Help(Charms.SanitizeLocalized("darkness.label", "LOCAL8", "Visibilidad completa: ") + (plugin.GroupDarkness.Value ? Charms.SanitizeLocalized("common.no", "LOCAL8", "NO") : Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ")), Charms.SanitizeLocalized("darkness.tip", "LOCAL8", "Muestra toda la sala; al desactivarla, solo se ve alrededor de los jugadores.")), button))
-		{
-			plugin.GroupDarkness.Value = !plugin.GroupDarkness.Value;
-		}
-		row += 42f;
-		if (!plugin.GroupDarkness.Value)
-		{
-			if (GUI.Button(new Rect(5f, row, cw - 10f, 35f), Help(Charms.SanitizeLocalized("camera.player_lights", "LOCAL8", "Luces de jugadores: ") + ((!(plugin.GatherDistance.Value < 27.5f)) ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("camera.player_lights.tip", "LOCAL8", "Oculta P2-P8; P1 mantiene su luz.")), button))
-			{
-				plugin.GatherDistance.Value = ((!(plugin.GatherDistance.Value < 27.5f)) ? 27f : 28f);
-			}
-			row += 42f;
-		}
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 35f), Help(Charms.SanitizeLocalized("wait.label", "LOCAL8", "Esperar al grupo: ") + (plugin.WaitForParty.Value ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("wait.tip", "LOCAL8", "Al salir de una sala, espera unos segundos para que el grupo pueda seguirte.")), button))
-		{
-			plugin.WaitForParty.Value = !plugin.WaitForParty.Value;
-		}
-		row += 42f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("revive.title", "LOCAL8", "REANIMACIÓN Y EFECTOS"), title);
-		row += 34f;
-		if (GUI.Button(new Rect(5f, row, cw * 0.48f, 35f), Help(Charms.SanitizeLocalized("respawn.label", "LOCAL8", "Reaparición automática: ") + (plugin.TimedRespawn.Value ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("respawn.tip", "LOCAL8", "Si queda alguien vivo, los jugadores caídos reaparecen tras el tiempo configurado.")), button))
-		{
-			plugin.TimedRespawn.Value = !plugin.TimedRespawn.Value;
-		}
-		if (GUI.Button(new Rect(cw * 0.51f, row, cw * 0.48f, 35f), Help(Charms.SanitizeLocalized("effects.label", "LOCAL8", "Efectos reducidos: ") + (plugin.ReduceHitEffects.Value ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("effects.tip", "LOCAL8", "Reduce destellos y pausas de impacto cuando atacan varios jugadores.")), button))
-		{
-			plugin.ReduceHitEffects.Value = !plugin.ReduceHitEffects.Value;
-		}
-		row += 104f;
-		RespawnSlider.Draw(plugin, cw, ref row);
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 35f), Help(Charms.SanitizeLocalized("shade.label", "LOCAL8", "Sombra al morir: ") + (plugin.SpawnShades.Value ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("shade.tip", "LOCAL8", "Crea una Sombra para cada jugador al morir.")), button))
-		{
-			plugin.SpawnShades.Value = !plugin.SpawnShades.Value;
-		}
-		row += 43f;
+		finally{GUI.enabled=enabled;}
+		row+=46;
+		if(count>=4||s.Players.Count>=8){MenuTheme.Text(new Rect(5,row,cw-10,38),UiLocalization.Get(count>=4?"keyboard.limit":"group.full"),MenuTheme.Muted,14);row+=44;}
+		if(MenuTheme.Button(new Rect(5,row,cw-10,34),UiLocalization.Get("common.back"),button))ChangeTab(0);
+		row+=43;
+	}
+
+	private static void GameOptions(Local8Runtime plugin,float cw,ref float row)
+	{
+		if(tab==4){KeyboardOptions(plugin,cw,ref row);return;}
+		MenuTheme.Section(UiLocalization.Get("difficulty.title"),cw,ref row,1);
+		string[] levels={UiLocalization.Get("difficulty.easy"),UiLocalization.Get("difficulty.normal"),UiLocalization.Get("difficulty.hard"),UiLocalization.Get("difficulty.extreme")};
+		float cell=(cw-10)/4;
+		for(int i=0;i<4;i++)if(MenuTheme.Choice(new Rect(7.5f+i*cell,row,cell-5,38),Help(levels[i],UiLocalization.Get("difficulty.tip")),plugin.Difficulty.Value==i))plugin.Difficulty.Value=i;
+		row+=43;
+		MenuTheme.Section(UiLocalization.Get("camera.title"),cw,ref row);
+		float half=(cw-15)/2;
+		if(MenuTheme.Toggle(new Rect(5,row,half,44),UiLocalization.Get("camera.shared"),plugin.ZoomByPlayerCount.Value,UiLocalization.Get("camera.tip")))plugin.ZoomByPlayerCount.Value=!plugin.ZoomByPlayerCount.Value;
+		if(MenuTheme.Toggle(new Rect(half+10,row,half,44),UiLocalization.Get("wait.label"),plugin.WaitForParty.Value,UiLocalization.Get("wait.tip")))plugin.WaitForParty.Value=!plugin.WaitForParty.Value;
+		row+=49;
+		MenuTheme.Text(new Rect(5,row,cw-170,34),UiLocalization.Get("camera.margin")+plugin.SideMargin.Value.ToString("0.0"),MenuTheme.Muted,14);
+		if(MenuTheme.Step(new Rect(cw-148,row,65,34),false))plugin.SideMargin.Value=Mathf.Max(2.8f,plugin.SideMargin.Value-.5f);
+		if(MenuTheme.Step(new Rect(cw-73,row,65,34),true))plugin.SideMargin.Value=Mathf.Min(10f,plugin.SideMargin.Value+.5f);
+		row+=41;
+		if(MenuTheme.Toggle(new Rect(5,row,half,44),UiLocalization.Get("darkness.label"),!plugin.GroupDarkness.Value,UiLocalization.Get("darkness.tip")))plugin.GroupDarkness.Value=!plugin.GroupDarkness.Value;
+		if(MenuTheme.Toggle(new Rect(half+10,row,half,44),UiLocalization.Get("camera.player_lights"),plugin.PlayerLights.Value,UiLocalization.Get("camera.player_lights.tip")))plugin.PlayerLights.Value=!plugin.PlayerLights.Value;
+		row+=47;
+		if(MenuTheme.Toggle(new Rect(5,row,cw-10,38),UiLocalization.Get("camera.smooth_lights"),plugin.SmoothPlayerLights.Value,UiLocalization.Get("camera.smooth_lights.tip")))plugin.SmoothPlayerLights.Value=!plugin.SmoothPlayerLights.Value;
+		row+=43;
+		MenuTheme.Section(UiLocalization.Get("revive.title"),cw,ref row);
+		if(MenuTheme.Toggle(new Rect(5,row,half,44),UiLocalization.Get("respawn.label"),plugin.TimedRespawn.Value,UiLocalization.Get("respawn.tip")))plugin.TimedRespawn.Value=!plugin.TimedRespawn.Value;
+		if(MenuTheme.Toggle(new Rect(half+10,row,half,44),UiLocalization.Get("shade.label"),plugin.SpawnShades.Value,UiLocalization.Get("shade.tip")))plugin.SpawnShades.Value=!plugin.SpawnShades.Value;
+		row+=48;
+		RespawnSlider.Draw(plugin,cw,ref row);
+		row+=2;
+		PerformanceMenu.Draw(plugin,cw,ref row);
 	}
 
 	private static void TransitionBar(float w, float h)
@@ -1157,47 +752,42 @@ internal static class Hud
 			GameOptions(plugin, cw, ref row);
 			return;
 		}
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("advanced.menu", "LOCAL8", "MENÚ"), title);
-		row += 35f;
-		if (GUI.Button(new Rect(5f, row, cw - 120f, 33f), Help(MenuInput.Waiting ? Charms.SanitizeLocalized("bind.capture_any", "LOCAL8", "Pulsa una tecla o botón... Esc para cancelar") : (Charms.SanitizeLocalized("advanced.open", "LOCAL8", "Abrir menú: ") + MenuInput.Label), Charms.SanitizeLocalized("bind.help", "LOCAL8", "Selecciona una acción y pulsa la tecla o botón que quieras usar.")), button))
+		MenuTheme.Section(UiLocalization.Get("advanced.menu"),cw,ref row);
+		if (MenuTheme.Button(new Rect(5f, row, cw - 160f, 37f), Help(MenuInput.Waiting ? Charms.SanitizeLocalized("bind.capture_any", "LOCAL8", "Pulsa una tecla o botón... Esc para cancelar") : (Charms.SanitizeLocalized("advanced.open", "LOCAL8", "Abrir menú: ") + MenuInput.Label), Charms.SanitizeLocalized("bind.help", "LOCAL8", "Selecciona una acción y pulsa la tecla o botón que quieras usar.")), button))
 		{
 			MenuInput.Waiting = true;
 		}
-		if (GUI.Button(new Rect(cw - 110f, row, 105f, 33f), Help(Charms.SanitizeLocalized("common.reset", "LOCAL8", "Restablecer"), Charms.SanitizeLocalized("advanced.reset_tip", "LOCAL8", "Restaura F8 como tecla del panel.")), button))
+		if (MenuTheme.Button(new Rect(cw - 150f, row, 145f, 37f), Help(Charms.SanitizeLocalized("common.reset", "LOCAL8", "Restablecer"), Charms.SanitizeLocalized("advanced.reset_tip", "LOCAL8", "Restaura F8 como tecla del panel.")), button))
 		{
 			MenuInput.Set(KeyCode.F8);
 		}
 		row += 49f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("rescue.title", "LOCAL8", "RESCATE ONÍRICO"), title);
-		row += 33f;
-		if (GUI.Button(new Rect(5f, row, cw * 0.61f - 8f, 33f), Help((ActionKeys.Capturing == 1) ? Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar") : (Charms.SanitizeLocalized("common.keyboard", "LOCAL8", "Teclado: ") + ActionKeys.RescueLabel), Charms.SanitizeLocalized("rescue.tip", "LOCAL8", "Mantén la tecla para viajar como partículas oníricas hacia un compañero. Recarga: 25 s.")), button))
+		MenuTheme.Section(UiLocalization.Get("rescue.title"),cw,ref row);
+		if (MenuTheme.Button(new Rect(5f, row, cw * 0.61f - 8f, 33f), Help((ActionKeys.Capturing == 1) ? Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar") : (Charms.SanitizeLocalized("common.keyboard", "LOCAL8", "Teclado: ") + ActionKeys.RescueLabel), Charms.SanitizeLocalized("rescue.tip", "LOCAL8", "Mantén la tecla para viajar como partículas oníricas hacia un compañero. Recarga: 25 s.")), button))
 		{
 			ActionKeys.Capturing = 1;
 			MenuInput.Waiting = false;
 		}
-		if (GUI.Button(new Rect(cw * 0.61f, row, cw * 0.39f - 5f, 33f), Help(Charms.SanitizeLocalized("common.controller", "LOCAL8", "Mando: ") + ActionKeys.ButtonLabel, Charms.SanitizeLocalized("rescue.controller_tip", "LOCAL8", "Botón de rescate para jugadores con mando.")), button))
+		if (MenuTheme.Button(new Rect(cw * 0.61f, row, cw * 0.39f - 5f, 33f), Help(Charms.SanitizeLocalized("common.controller", "LOCAL8", "Mando: ") + ActionKeys.ButtonLabel, Charms.SanitizeLocalized("rescue.controller_tip", "LOCAL8", "Botón de rescate para jugadores con mando.")), button))
 		{
 			Local8Mod.Settings.RescueButton = (Local8Mod.Settings.RescueButton + 1) % 4;
 		}
 		row += 45f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("duel.title", "LOCAL8", "DUELOS"), title);
-		row += 33f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 33f), Help((ActionKeys.Capturing == 2) ? Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar") : (Charms.SanitizeLocalized("duel.toggle", "LOCAL8", "Iniciar / detener PvP: ") + ActionKeys.PvpLabel), Charms.SanitizeLocalized("duel.tip", "LOCAL8", "Inicia o detiene las rondas de duelo.")), button))
+		MenuTheme.Section(UiLocalization.Get("duel.title"),cw,ref row);
+		if (MenuTheme.Button(new Rect(5f, row, cw - 10f, 33f), Help((ActionKeys.Capturing == 2) ? Charms.SanitizeLocalized("bind.capture", "LOCAL8", "Pulsa una tecla... Esc para cancelar") : (Charms.SanitizeLocalized("duel.toggle", "LOCAL8", "Iniciar / detener PvP: ") + ActionKeys.PvpLabel), Charms.SanitizeLocalized("duel.tip", "LOCAL8", "Inicia o detiene las rondas de duelo.")), button))
 		{
 			ActionKeys.Capturing = 2;
 			MenuInput.Waiting = false;
 		}
 		row += 48f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("virtual.title", "LOCAL8", "MANDOS VIRTUALES"), title);
-		row += 35f;
+		MenuTheme.Section(UiLocalization.Get("virtual.title"),cw,ref row);
 		GUI.Label(new Rect(5f, row + 4f, cw - 210f, 30f), Charms.SanitizeLocalized("vjoy.label", "LOCAL8", "vJoy / DirectInput: ") + Controls.VirtualCount + Charms.SanitizeLocalized("vjoy.detected", "LOCAL8", " detectados") + (Controls.NativeActive ? "" : Charms.SanitizeLocalized("vjoy.inactive", "LOCAL8", " (lector inactivo)")), small);
-		if (GUI.Button(new Rect(cw - 205f, row, 200f, 30f), Charms.SanitizeLocalized("vjoy.search", "LOCAL8", "Buscar vJoy"), button))
+		if (MenuTheme.Button(new Rect(cw - 205f, row, 200f, 30f), Charms.SanitizeLocalized("vjoy.search", "LOCAL8", "Buscar vJoy"), button))
 		{
 			Controls.EnableDirectInput(requested: true);
 		}
 		row += 54f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("diagnostic.title", "LOCAL8", "DIAGNÓSTICO"), title);
-		row += 35f;
+		MenuTheme.Section(UiLocalization.Get("diagnostic.title"),cw,ref row);
 		DrawLogButtons(5f, row, cw);
 		row += 43f;
 		if (!plugin.BasicHud.Value && !HudAssets.Ready)
@@ -1208,9 +798,14 @@ internal static class Hud
 
 	private static void PvpOptions(Local8Runtime plugin, CoopSession session, float cw, ref float row)
 	{
-		Local8Settings settings = Local8Mod.Settings;
-		GUI.Label(new Rect(5f, row, cw, 27f), Charms.SanitizeLocalized("pvp.title", "LOCAL8", "COMBATE ENTRE JUGADORES"), title);
-		row += 36f;
+		Local8Settings settings=Local8Mod.Settings;
+		string[] pages={UiLocalization.Get("menu.combat"),UiLocalization.Get("pvp.teams"),UiLocalization.Get("pvp.round_settings"),PvpArena.Text("title")};
+		float cell=(cw-10)/4;
+		for(int i=0;i<pages.Length;i++)if(MenuTheme.Choice(new Rect(7.5f+i*cell,row,cell-5,52),new GUIContent(pages[i]),pvpPage==i)&&pvpPage!=i){pvpPage=i;scroll=Vector2.zero;}
+		row+=67;
+		if(pvpPage==0)
+		{
+		MenuTheme.Section(UiLocalization.Get("pvp.title"),cw,ref row);
 		string[] array = new string[3]
 		{
 			Charms.SanitizeLocalized("pvp.coop", "LOCAL8", "Cooperativo"),
@@ -1220,40 +815,45 @@ internal static class Hud
 		float num = (cw - 10f) / 3f;
 		for (int i = 0; i < 3; i++)
 		{
-			if (GUI.Button(new Rect(5f + (float)i * num, row, num - 5f, 35f), Help(((settings.PvpMode == i) ? "> " : "") + array[i], i switch
+			if (MenuTheme.Choice(new Rect(5f + (float)i * num, row, num - 5f, 38f), Help(array[i], i switch
 			{
 				1 => Charms.SanitizeLocalized("pvp.friendly_tip", "LOCAL8", "Aventura cooperativa con daño entre jugadores."), 
 				0 => Charms.SanitizeLocalized("pvp.coop_tip", "LOCAL8", "Aventura cooperativa sin daño entre jugadores."), 
 				_ => Charms.SanitizeLocalized("pvp.rounds_tip", "LOCAL8", "Combates por rondas con marcador y reaparición."), 
-			}), button))
+			}), settings.PvpMode == i))
 			{
 				PvpMatch.SetMode(i);
 			}
 		}
 		row += 45f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("pvp.damage", "LOCAL8", "DAÑO POR GOLPE"), title);
-		row += 34f;
+		MenuTheme.Section(UiLocalization.Get("pvp.damage"),cw,ref row);
 		PvpNumber(Charms.SanitizeLocalized("pvp.nail", "LOCAL8", "Aguijón"), ref settings.PvpNailDamage, 1, 5, 1, cw, ref row);
 		PvpNumber(Charms.SanitizeLocalized("pvp.spells", "LOCAL8", "Hechizos y rayos"), ref settings.PvpSpellDamage, 1, 5, 1, cw, ref row);
 		PvpNumber(Charms.SanitizeLocalized("pvp.nailarts", "LOCAL8", "Artes del aguijón"), ref settings.PvpArtDamage, 1, 5, 1, cw, ref row);
 		PvpNumber(Charms.SanitizeLocalized("pvp.charms", "LOCAL8", "Amuletos / mascotas / Sombra Afilada"), ref settings.PvpCharmDamage, 1, 5, 1, cw, ref row);
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 32f), Help(Charms.SanitizeLocalized("pvp.parry", "LOCAL8", "Parry: ") + (settings.PvpParry ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("pvp.parry_tip", "LOCAL8", "El choque cancela ambos ataques y da una breve invulnerabilidad.")), button))
+		if (MenuTheme.Toggle(new Rect(5f,row,cw-10f,38f),UiLocalization.Get("pvp.parry"),settings.PvpParry,UiLocalization.Get("pvp.parry_tip")))
 		{
 			settings.PvpParry = !settings.PvpParry;
 		}
-		row += 38f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 32f), Help(Charms.SanitizeLocalized("pvp.charm_attacks", "LOCAL8", "Ataques de amuletos: ") + (settings.PvpCharmAttacks ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("pvp.charm_attacks_tip", "LOCAL8", "Permite daño con mascotas, amuletos y Sombra Afilada.")), button))
+		row += 44f;
+		if (MenuTheme.Toggle(new Rect(5f,row,cw-10f,38f),UiLocalization.Get("pvp.charm_attacks"),settings.PvpCharmAttacks,UiLocalization.Get("pvp.charm_attacks_tip")))
 		{
 			settings.PvpCharmAttacks = !settings.PvpCharmAttacks;
 		}
-		row += 38f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 32f), Help(Charms.SanitizeLocalized("pvp.soul_hit", "LOCAL8", "Alma al acertar: ") + (settings.PvpSoulOnHit ? Charms.SanitizeLocalized("common.yes", "LOCAL8", "SÍ") : Charms.SanitizeLocalized("common.no", "LOCAL8", "NO")), Charms.SanitizeLocalized("pvp.soul_hit_tip", "LOCAL8", "Los golpes de aguijón contra otro jugador recuperan alma.")), button))
+		row += 44f;
+		if (MenuTheme.Toggle(new Rect(5f,row,cw-10f,38f),UiLocalization.Get("pvp.soul_hit"),settings.PvpSoulOnHit,UiLocalization.Get("pvp.soul_hit_tip")))
 		{
 			settings.PvpSoulOnHit = !settings.PvpSoulOnHit;
 		}
 		row += 43f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("pvp.teams", "LOCAL8", "EQUIPOS Y MARCADOR"), title);
-		row += 33f;
+		}
+		else if(pvpPage==1)
+		{
+		if(MenuTheme.Choice(new Rect(5,row,cw*.5f-8,35),new GUIContent("PvP"),!adventurePage))adventurePage=false;
+		if(MenuTheme.Choice(new Rect(cw*.5f,row,cw*.5f-5,35),new GUIContent(UiLocalization.Get("stats.adventure")),adventurePage))adventurePage=true;
+		row+=43;
+		if(adventurePage){AdventureStatsUI.Draw(session,cw,ref row);return;}
+		MenuTheme.Section(UiLocalization.Get("pvp.teams"),cw,ref row);
 		foreach (PlayerSlot player in session.Players)
 		{
 			int index = player.Index;
@@ -1264,7 +864,7 @@ internal static class Hud
 					textColor = player.Color
 				}
 			});
-			if (GUI.Button(new Rect(50f, row, 110f, 30f), Help((settings.PvpTeams[index] == 0) ? Charms.SanitizeLocalized("pvp.free", "LOCAL8", "Libre") : (Charms.SanitizeLocalized("pvp.team", "LOCAL8", "Equipo ") + settings.PvpTeams[index]), Charms.SanitizeLocalized("pvp.free_tip", "LOCAL8", "Libre: todos contra todos. Los compañeros de equipo no se hacen daño.")), button))
+			if (MenuTheme.Button(new Rect(50f, row, 110f, 30f), Help((settings.PvpTeams[index] == 0) ? Charms.SanitizeLocalized("pvp.free", "LOCAL8", "Libre") : (Charms.SanitizeLocalized("pvp.team", "LOCAL8", "Equipo ") + settings.PvpTeams[index]), Charms.SanitizeLocalized("pvp.free_tip", "LOCAL8", "Libre: todos contra todos. Los compañeros de equipo no se hacen daño.")), button))
 			{
 				PvpMatch.Stop(restorePosition: true);
 				settings.PvpTeams[index] = (settings.PvpTeams[index] + 1) % 5;
@@ -1274,27 +874,35 @@ internal static class Hud
 			row += 37f;
 		}
 		row += 8f;
-		GUI.Label(new Rect(5f, row, cw, 26f), Charms.SanitizeLocalized("pvp.round_settings", "LOCAL8", "RONDAS"), title);
-		row += 33f;
+		}
+		else if(pvpPage==2)
+		{
+		MenuTheme.Section(UiLocalization.Get("pvp.round_settings"),cw,ref row);
 		PvpNumber(Charms.SanitizeLocalized("pvp.start_soul", "LOCAL8", "Alma inicial"), ref settings.DuelSoul, 0, 99, 33, cw, ref row);
 		PvpRoundClock.Number(Charms.SanitizeLocalized("pvp.round_time", "LOCAL8", "Tiempo por ronda (segundos)"), ref settings.DuelSeconds, 30, 600, 30, cw, ref row);
-		GUI.Label(new Rect(5f, row + 5f, cw - 155f, 26f), Charms.SanitizeLocalized("pvp.bestof", "LOCAL8", "Mejor de: ") + ((settings.DuelBestOf == 0) ? Charms.SanitizeLocalized("pvp.unlimited", "LOCAL8", "sin límite") : settings.DuelBestOf.ToString()), small);
-		if (GUI.Button(new Rect(cw - 145f, row, 65f, 29f), "-", button))
+		GUI.Label(new Rect(8f, row, cw - 178f, 34f), Charms.SanitizeLocalized("pvp.bestof", "LOCAL8", "Mejor de: ") + ((settings.DuelBestOf == 0) ? Charms.SanitizeLocalized("pvp.unlimited", "LOCAL8", "sin límite") : settings.DuelBestOf.ToString()), MenuTheme.Label);
+		if (MenuTheme.Step(new Rect(cw - 148f, row, 65f, 34f), false))
 		{
 			settings.DuelBestOf = PvpRules.SeriesLength(settings.DuelBestOf - 2);
 		}
-		if (GUI.Button(new Rect(cw - 70f, row, 65f, 29f), "+", button))
+		if (MenuTheme.Step(new Rect(cw - 73f, row, 65f, 34f), true))
 		{
 			settings.DuelBestOf = PvpRules.SeriesLength((settings.DuelBestOf == 0) ? 1 : (settings.DuelBestOf + 2));
 		}
-		row += 36f;
-		if (GUI.Button(new Rect(5f, row, cw - 10f, 31f), Help(Charms.SanitizeLocalized("pvp.duel_key", "LOCAL8", "Tecla de duelo: ") + ((ActionKeys.Capturing == 2) ? Charms.SanitizeLocalized("bind.capture_short", "LOCAL8", "Pulsa una tecla...") : ActionKeys.PvpLabel), Charms.SanitizeLocalized("pvp.duel_key_tip", "LOCAL8", "Cambia la tecla que inicia o detiene el PvP.")), button))
+		row += 41f;
+		if (MenuTheme.Button(new Rect(5f, row, cw - 10f, 31f), Help(Charms.SanitizeLocalized("pvp.duel_key", "LOCAL8", "Tecla de duelo: ") + ((ActionKeys.Capturing == 2) ? Charms.SanitizeLocalized("bind.capture_short", "LOCAL8", "Pulsa una tecla...") : ActionKeys.PvpLabel), Charms.SanitizeLocalized("pvp.duel_key_tip", "LOCAL8", "Cambia la tecla que inicia o detiene el PvP.")), button))
 		{
 			ActionKeys.Capturing = 2;
 			MenuInput.Waiting = false;
 		}
 		row += 39f;
-		if (GUI.Button(new Rect(5f, row, cw * 0.48f, 34f), Help(PvpMatch.Running ? Charms.SanitizeLocalized("pvp.end_duel", "LOCAL8", "Terminar duelo") : Charms.SanitizeLocalized("pvp.start_rounds", "LOCAL8", "Iniciar rondas"), Charms.SanitizeLocalized("pvp.start_tip", "LOCAL8", "Empieza desde las posiciones actuales tras una cuenta atrás de 3 segundos.")), button))
+		}
+		else
+		{
+			PvpArenaUI.Draw(plugin,session,cw,ref row);return;
+		}
+		row+=12;
+		if (MenuTheme.Button(new Rect(5f, row, cw * 0.48f, 34f), Help(PvpMatch.Running ? Charms.SanitizeLocalized("pvp.end_duel", "LOCAL8", "Terminar duelo") : Charms.SanitizeLocalized("pvp.start_rounds", "LOCAL8", "Iniciar rondas"), Charms.SanitizeLocalized("pvp.start_tip", "LOCAL8", "Empieza desde las posiciones actuales tras una cuenta atrás de 3 segundos.")), button))
 		{
 			if (PvpMatch.Running)
 			{
@@ -1307,7 +915,7 @@ internal static class Hud
 				PvpMatch.RequestStart();
 			}
 		}
-		if (GUI.Button(new Rect(cw * 0.51f, row, cw * 0.48f, 34f), Help(Charms.SanitizeLocalized("pvp.clear", "LOCAL8", "Borrar marcador"), Charms.SanitizeLocalized("pvp.clear_tip", "LOCAL8", "Reinicia rondas ganadas, bajas y parries.")), button))
+		if (MenuTheme.Button(new Rect(cw * 0.51f, row, cw * 0.48f, 34f), Help(Charms.SanitizeLocalized("pvp.clear", "LOCAL8", "Borrar marcador"), Charms.SanitizeLocalized("pvp.clear_tip", "LOCAL8", "Reinicia rondas ganadas, bajas y parries.")), button))
 		{
 			PvpCombat.ResetScores();
 		}
@@ -1324,21 +932,21 @@ internal static class Hud
 			});
 			row += 46f;
 		}
-		PvpArenaUI.Draw(plugin, session, cw, ref row);
 	}
 
 	private static void PvpNumber(string label, ref int value, int min, int max, int step, float cw, ref float row)
 	{
-		GUI.Label(new Rect(5f, row + 5f, cw - 155f, 26f), label + ": " + value, small);
-		if (GUI.Button(new Rect(cw - 145f, row, 65f, 29f), "-", button))
+		value=Mathf.Clamp(value,min,max);
+		GUI.Label(new Rect(8f, row, cw - 178f, 34f), label + ": " + value, MenuTheme.Label);
+		if (MenuTheme.Step(new Rect(cw - 148f, row, 65f, 34f), false))
 		{
 			value = Mathf.Max(min, value - step);
 		}
-		if (GUI.Button(new Rect(cw - 70f, row, 65f, 29f), "+", button))
+		if (MenuTheme.Step(new Rect(cw - 73f, row, 65f, 34f), true))
 		{
 			value = Mathf.Min(max, value + step);
 		}
-		row += 35f;
+		row += 41f;
 	}
 
 	private static void FindNativeFont()
@@ -1408,15 +1016,12 @@ internal static class Hud
 			if (text.Length != 0 && !(Time.unscaledTime - tipSince < 0.35f) && Event.current.type == EventType.Repaint)
 			{
 				float num = Mathf.Min(345f, w - 24f);
-				GUIStyle gUIStyle = new GUIStyle(small)
-				{
-					wordWrap = true,
-					padding = new RectOffset(12, 12, 9, 9)
-				};
+				GUIStyle gUIStyle = MenuTheme.TooltipStyle;
 				float num2 = gUIStyle.CalcHeight(new GUIContent(text), num);
 				Vector2 mousePosition = Event.current.mousePosition;
 				Rect rect = new Rect(Mathf.Clamp(mousePosition.x + 16f, 8f, w - num - 8f), Mathf.Clamp(mousePosition.y + 20f, 8f, h - num2 - 8f), num, num2);
-				Box(rect, new Color(0.035f, 0.04f, 0.06f, 0.98f));
+				Box(rect, MenuTheme.Ink);
+				MenuArt.Nine(rect,MenuArt.Selection,new Color(.64f,.69f,.76f,.8f));
 				GUI.Label(rect, text, gUIStyle);
 			}
 		}
@@ -1424,11 +1029,11 @@ internal static class Hud
 
 	private static void DrawLogButtons(float x, float y, float width)
 	{
-		if (GUI.Button(new Rect(x, y, width * 0.48f, 30f), UiLocalization.Get("logs.open"), button))
+		if (MenuTheme.Button(new Rect(x, y, width * 0.48f, 30f), UiLocalization.Get("logs.open"), button))
 		{
 			Diagnostics.OpenFolder();
 		}
-		if (GUI.Button(new Rect(x + width * 0.5f, y, width * 0.48f, 30f), UiLocalization.Get("logs.copy"), button))
+		if (MenuTheme.Button(new Rect(x + width * 0.5f, y, width * 0.48f, 30f), UiLocalization.Get("logs.copy"), button))
 		{
 			Diagnostics.CopyFolder();
 		}
@@ -1485,16 +1090,11 @@ internal static class Hud
 			s.Primary.Charms.Read(s.Data);
 		}
 		int count = s.Players.Count;
-		int num = ((count <= 3) ? count : 4);
-		int num2 = (count + num - 1) / num;
-		Rect r = new Rect(w * 0.104f, h * 0.185f, w * 0.478f, h * 0.294f);
-		Box(r, new Color(0.035f, 0.027f, 0.03f, 0.97f));
-		float num3 = 4f;
-		float num4 = (r.width - num3 * (float)(num + 1)) / (float)num;
-		float num5 = (r.height - num3 * (float)(num2 + 1)) / (float)num2;
+		Rect r = CharmMenuLayout.Cards(w, h, count);
+		CharmMenuBackdrop.Draw(r, h, new Color(0.035f, 0.027f, 0.03f, 1f));
 		for (int i = 0; i < count; i++)
 		{
-			DrawCharmCard(s.Players[i], r: new Rect(r.x + num3 + (float)(i % num) * (num4 + num3), r.y + num3 + (float)(i / num) * (num5 + num3), num4, num5), data: s.Data);
+			DrawCharmCard(s.Players[i], s.Data, CharmMenuLayout.Card(r, i, count));
 		}
 		DrawNativeCharmCursors(s, scale);
 		RoleUI.DrawNative(s, w, h, scale);
@@ -1509,7 +1109,7 @@ internal static class Hud
 		}
 		foreach (PlayerSlot player in s.Players)
 		{
-			if (!player.Alive || !player.Ready)
+			if (!player.Alive || !player.Ready || RoleSystem.State(player).Equipped.Active)
 			{
 				continue;
 			}
@@ -1542,23 +1142,14 @@ internal static class Hud
 			int num4 = 0;
 			foreach (PlayerSlot player2 in s.Players)
 			{
-				if (player2.Index < player.Index && Charms.NativeCursor[player2.Index] == num)
+				if (player2.Index < player.Index && !RoleSystem.State(player2).Equipped.Active && Charms.NativeCursor[player2.Index] == num)
 				{
 					num4++;
 				}
 			}
 			float num5 = (float)(58 + num4 * 9) * 0.5f;
 			Color color = player.Color;
-			float num6 = 2.5f;
-			float num7 = 11f;
-			Box(new Rect(num2 - num5, num3 - num5, num7, num6), color);
-			Box(new Rect(num2 - num5, num3 - num5, num6, num7), color);
-			Box(new Rect(num2 + num5 - num7, num3 - num5, num7, num6), color);
-			Box(new Rect(num2 + num5 - num6, num3 - num5, num6, num7), color);
-			Box(new Rect(num2 - num5, num3 + num5 - num6, num7, num6), color);
-			Box(new Rect(num2 - num5, num3 + num5 - num7, num6, num7), color);
-			Box(new Rect(num2 + num5 - num7, num3 + num5 - num6, num7, num6), color);
-			Box(new Rect(num2 + num5 - num6, num3 + num5 - num7, num6, num7), color);
+			CharmCursorUI.Draw(new Rect(num2 - num5, num3 - num5, num5 * 2f, num5 * 2f), color);
 			GUI.Label(new Rect(num2 - num5, num3 - num5 - 23f, 38f, 21f), "P" + (player.Index + 1), new GUIStyle(tag)
 			{
 				fontSize = 14,
@@ -1589,35 +1180,35 @@ internal static class Hud
 		float num2 = Mathf.Min(790f, h - 24f);
 		float num3 = (w - num) / 2f;
 		float num4 = (h - num2) / 2f;
-		Box(new Rect(num3, num4, num, num2), new Color(0.025f, 0.035f, 0.065f, 0.99f));
-		GUI.Label(new Rect(num3 + 20f, num4 + 15f, num - 130f, 32f), UiLocalization.Get("charms.title") + (playerSlot.Index + 1), new GUIStyle(title)
-		{
-			normal = 
-			{
-				textColor = playerSlot.Color
-			}
-		});
-		if (GUI.Button(new Rect(num3 + num - 105f, num4 + 15f, 85f, 30f), UiLocalization.Get("common.back"), button))
+		MenuTheme.Frame(new Rect(num3,num4,num,num2));
+		MenuTheme.Centered(new Rect(num3+76,num4+18,num-152,32),UiLocalization.Get("charms.title")+(playerSlot.Index+1),playerSlot.Color,22);
+		if (MenuTheme.Button(new Rect(num3 + num - 105f, num4 + 15f, 85f, 30f), UiLocalization.Get("common.back"), button))
 		{
 			Charms.Close();
 		}
 		float num5 = num3 + 20f;
 		foreach (PlayerSlot player in session.Players)
 		{
-			Box(new Rect(num5, num4 + 55f, 55f, 28f), (player.Index == playerSlot.Index) ? new Color(player.Color.r, player.Color.g, player.Color.b, 0.42f) : new Color(player.Color.r, player.Color.g, player.Color.b, 0.15f));
-			GUI.Label(new Rect(num5, num4 + 55f, 55f, 28f), "P" + (player.Index + 1), tag);
+			if(MenuTheme.Card(new Rect(num5,num4+55f,55f,28f),new GUIContent("P"+(player.Index+1)),player.Index==Charms.Selected,player.Color))Charms.Select(player);
 			num5 += 60f;
 		}
-		GUI.Label(new Rect(num3 + 20f, num4 + 94f, num - 40f, 44f), UiLocalization.Get("charms.notches_prefix") + playerSlot.Charms.Used + " / " + session.Data.charmSlots + (playerSlot.Charms.Overcharmed ? UiLocalization.Get("charms.overcharmed_suffix") : "") + "   " + (Charms.CanEdit(playerSlot) ? UiLocalization.Get("charms.editable") : UiLocalization.Get("charms.rest")), small);
+		playerSlot=session.Players.First(v=>v.Index==Charms.Selected);
+		MenuTheme.Text(new Rect(num3+20,num4+90,num-40,21),UiLocalization.Get("charms.notches_prefix")+playerSlot.Charms.Used+" / "+session.Data.charmSlots+(playerSlot.Charms.Overcharmed?UiLocalization.Get("charms.overcharmed_suffix"):""),MenuTheme.Muted,13);
+		MenuTheme.Text(new Rect(num3+20,num4+113,num-40,27),Charms.CanEdit(playerSlot)?UiLocalization.Get("charms.editable"):UiLocalization.Get("charms.bench"),Charms.CanEdit(playerSlot)?MenuTheme.Muted:new Color(1,.76f,.64f),13);
+		int[] charmIds = CharmExtensions.Ids();
+		int charmRows = (charmIds.Length + 9) / 10;
 		float num6 = Mathf.Min(72f, (num - 40f) / 10f);
+		if (charmIds.Length > 40) num6 = Mathf.Min(num6, Mathf.Max(10f, (num2 - 300f) / charmRows));
 		float num7 = num3 + (num - num6 * 10f) / 2f;
 		float num8 = num4 + 142f;
-		for (int i = 1; i <= 40; i++)
+		for (int charmIndex = 0; charmIndex < charmIds.Length; charmIndex++)
 		{
-			Rect rect = new Rect(num7 + (float)((i - 1) % 10) * num6, num8 + (float)((i - 1) / 10) * num6, num6 - 5f, num6 - 5f);
+			int i = charmIds[charmIndex];
+			Rect rect = new Rect(num7 + (float)(charmIndex % 10) * num6, num8 + (float)(charmIndex / 10) * num6, num6 - 5f, num6 - 5f);
 			bool @bool = session.Data.GetBool("gotCharm_" + i);
-			bool flag = playerSlot.Charms.Equipped[i - 1];
+			bool flag = playerSlot.Charms.IsEquipped(i);
 			Box(rect, (i == Charms.Cursor) ? new Color(0.38f, 0.42f, 0.55f, 0.9f) : (flag ? new Color(playerSlot.Color.r, playerSlot.Color.g, playerSlot.Color.b, 0.32f) : new Color(0.13f, 0.14f, 0.18f, 0.7f)));
+			if(i==Charms.Cursor||flag)MenuArt.Nine(rect,MenuArt.Selection,i==Charms.Cursor?MenuTheme.Paper:playerSlot.Color);
 			if (@bool)
 			{
 				Texture2D texture2D = Charms.Icon(i);
@@ -1634,7 +1225,7 @@ internal static class Hud
 			{
 				GUI.Label(rect, "?", tag);
 			}
-			if (playerSlot.Index == 0 && GUI.Button(rect, "", GUIStyle.none))
+			if (MenuTheme.Button(rect, "", GUIStyle.none))
 			{
 				Charms.Cursor = i;
 				if (@bool)
@@ -1642,7 +1233,7 @@ internal static class Hud
 					Charms.Toggle(playerSlot, i);
 				}
 			}
-			if (playerSlot.Index == 0 && rect.Contains(Event.current.mousePosition))
+			if (Event.current.type == EventType.MouseMove && rect.Contains(Event.current.mousePosition))
 			{
 				Charms.Cursor = i;
 			}
@@ -1656,7 +1247,7 @@ internal static class Hud
 			}
 		}
 		int cursor = Charms.Cursor;
-		float num9 = num8 + 4f * num6 + 12f;
+		float num9 = num8 + charmRows * num6 + 12f;
 		bool bool2 = session.Data.GetBool("gotCharm_" + cursor);
 		GUI.Label(new Rect(num3 + 20f, num9, num - 40f, 30f), bool2 ? (Charms.Name(cursor) + " - " + session.Data.GetInt("charmCost_" + cursor) + UiLocalization.Get("charms.notches_suffix")) : UiLocalization.Get("charms.undiscovered"), text);
 		if (bool2)

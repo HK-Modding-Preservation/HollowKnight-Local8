@@ -1,0 +1,21 @@
+static string Kind(Fsm f){
+  if(f==null||!f.GameObject)return null;
+  string kind;if(kinds.TryGetValue(f,out kind))return kind;
+  // An actor's ordinary Spell Control can contain an upgrade branch too.
+  // It becomes a ritual source only at the real level-change call below,
+  // never merely because a heal/teleport elsewhere takes control.
+  if(f.GameObject.GetComponentInParent<HeroController>())return null;
+  Probe probe;if(unrecognized.TryGetValue(f,out probe)&&probe.States==f.States&&Time.unscaledTime<probe.Next)return null;
+  if(f.Name=="Get Shadow Dash"&&Scenes.GetActiveScene().name=="Abyss_10")kind="Shade Cloak";
+  else if(f.Name=="Scream Get"&&f.GameObject.name=="Scream 2 Get"&&Scenes.GetActiveScene().name=="Abyss_12")kind="Abyss Shriek";
+  else if(f.States!=null)foreach(var state in f.States){if(state==null||state.Actions==null)continue;
+   foreach(var action in state.Actions){
+    kind=Acquisition(action);if(kind!=null)break;
+   }if(kind!=null)break;
+  }
+  // States/actions may not yet be deserialized at the first trigger callback.
+  // Cache positive identities only; a premature null must not poison the room.
+  if(kind!=null){kinds[f]=kind;unrecognized.Remove(f);}
+  else if(f.States!=null&&f.States.Length>0)unrecognized[f]=new Probe{States=f.States,Next=Time.unscaledTime+.5f};
+  return kind;
+ }

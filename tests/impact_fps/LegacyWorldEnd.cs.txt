@@ -1,0 +1,24 @@
+internal static void LegacyEnd(Fsm f, Call before)
+	{
+		Current = before.Previous;
+		CoopSession coopSession = ((Plugin.Self == null) ? null : Plugin.Self.Session);
+		PlayerSlot player = before.Player;
+		GameManager instance = GameManager.instance;
+		if (coopSession == null || !coopSession.Active || player == null || !player.Ready || !player.Alive || !instance || !instance.IsGameplayScene() || instance.IsLoadingSceneTransition || !instance.HasFinishedEnteringScene || player.ArenaTransfer || ArenaGather.TransferActive || EmergencyWarp.Active(player) || CoopEnding.Active || ScriptedParty.Active || BenchSeats.Seated(player))
+		{
+			return;
+		}
+		Vector3 position = player.Hero.transform.position;
+		if (!(position.y < -100f))
+		{
+			float num = Vector2.Distance(before.Position, position);
+			bool flag = player.Hero.controlReqlinquished && num > 8f;
+			if (!(num < 6f) && (!coopSession.InRoom(position) || flag) && (!InteractionRouter.IsInteraction(f) || flag))
+			{
+				NativeDreamFx.TeleportTrail(player, before.Position, position);
+				warp = player;
+				warpAt = position;
+				warpTime = Time.unscaledTime;
+			}
+		}
+	}

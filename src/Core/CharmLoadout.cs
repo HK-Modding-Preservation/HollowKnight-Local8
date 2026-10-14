@@ -8,7 +8,19 @@ internal sealed class CharmLoadout
 {
 	internal readonly bool[] Equipped = new bool[40];
 
+	internal readonly HashSet<int> Extra = new HashSet<int>();
+
+	internal bool IsEquipped(int id)
+	{
+		return id > 0 && (id <= 40 ? Equipped[id - 1] : Extra.Contains(id));
+	}
+
 	internal List<int> Order = new List<int>();
+
+	// The provider/save code may edit PlayerData.equippedCharms in place. Keep
+	// a detached slot snapshot and a separate reusable list for each Apply.
+	private readonly List<int> extraOrder = new List<int>();
+	private readonly List<int> appliedOrder = new List<int>();
 
 	internal int Used;
 
@@ -56,7 +68,33 @@ internal sealed class CharmLoadout
 		Equipped[37] = data.equippedCharm_38;
 		Equipped[38] = data.equippedCharm_39;
 		Equipped[39] = data.equippedCharm_40;
-		Order = data.equippedCharms ?? new List<int>();
+		List<int> source = data.equippedCharms;
+		if (source != null) foreach (int id in source)
+			if (id > 40 && !CharmExtensions.Contains(id) && CharmExtensions.Owned(data, id)) CharmExtensions.Register(id);
+		Extra.Clear();
+		CharmExtensions.Entry[] extra = CharmExtensions.Entries;
+		if (extra.Length == 0) Order = source ?? new List<int>();
+		else
+		{
+			if (!ReferenceEquals(source, extraOrder))
+			{
+				extraOrder.Clear();
+				if (source != null) extraOrder.AddRange(source);
+			}
+			Order = extraOrder;
+		}
+		foreach (CharmExtensions.Entry entry in extra)
+		{
+			if (CharmExtensions.Equipped(data, entry))
+			{
+				Extra.Add(entry.Id);
+				if (!Order.Contains(entry.Id)) Order.Add(entry.Id);
+			}
+			else
+			{
+				for (int i = Order.Count - 1; i >= 0; i--) if (Order[i] == entry.Id) Order.RemoveAt(i);
+			}
+		}
 		Used = data.charmSlotsFilled;
 		Overcharmed = data.overcharmed;
 	}
@@ -103,7 +141,19 @@ internal sealed class CharmLoadout
 		data.equippedCharm_38 = Equipped[37];
 		data.equippedCharm_39 = Equipped[38];
 		data.equippedCharm_40 = Equipped[39];
-		data.equippedCharms = Order;
+		CharmExtensions.Entry[] extra = CharmExtensions.Entries;
+		foreach (CharmExtensions.Entry entry in extra)
+		{
+			bool equipped = Extra.Contains(entry.Id);
+			CharmExtensions.Equip(data, entry, equipped);
+		}
+		if (extra.Length == 0) data.equippedCharms = Order;
+		else
+		{
+			appliedOrder.Clear();
+			appliedOrder.AddRange(Order);
+			data.equippedCharms = appliedOrder;
+		}
 		data.charmSlotsFilled = Used;
 		data.overcharmed = Overcharmed;
 	}
@@ -112,24 +162,27 @@ internal sealed class CharmLoadout
 	{
 		return (from i in Enumerable.Range(1, 40)
 			where Equipped[i - 1]
-			select i).ToArray();
+			select i).Concat(Extra.OrderBy(id => id)).ToArray();
 	}
 
 	internal void Initialize(PlayerData data, int[] ids)
 	{
 		Array.Clear(Equipped, 0, 40);
+		Extra.Clear();
+		CharmExtensions.Discover();
 		Order = new List<int>();
 		Used = 0;
 		int[] array = ids ?? new int[0];
 		for (int i = 0; i < array.Length; i++)
 		{
 			int num = array[i];
-			if (num >= 1 && num <= 40 && !Equipped[num - 1] && data.GetBool("gotCharm_" + num))
+			if (num >= 1 && !IsEquipped(num) && CharmExtensions.Owned(data, num))
 			{
 				int num2 = Math.Max(0, data.GetInt("charmCost_" + num));
 				if (CoopRules.CanEquip(Used, num2, data.charmSlots, data.canOvercharm))
 				{
-					Equipped[num - 1] = true;
+					if (num <= 40) Equipped[num - 1] = true;
+					else { CharmExtensions.Register(num); Extra.Add(num); }
 					Order.Add(num);
 					Used += num2;
 				}

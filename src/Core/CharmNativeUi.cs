@@ -127,6 +127,7 @@ internal static class CharmNativeUi
 		if (view == null)
 		{
 			view = new HeroActions();
+			MenuInputRecovery.CaptureCreated(view);
 			neutral = view.menuSubmit;
 		}
 		HeroActions actions = session.Primary.Actions;
@@ -368,6 +369,7 @@ internal static class CharmNativeUi
 		targets.Clear();
 		if (view != null)
 		{
+			MenuInputRecovery.Flush();
 			view.Destroy();
 			view = null;
 			neutral = null;

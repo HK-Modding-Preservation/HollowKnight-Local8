@@ -15,6 +15,7 @@ internal static class CrystalDashTransit {
  static readonly Flight[] flights=new Flight[8];
  static CoopSession Session=>Plugin.Self?Plugin.Self.Session:null;
  static bool Living(PlayerSlot p)=>p!=null&&p.Index>=0&&p.Index<8&&p.Hero&&!p.Down&&!p.Hero.cState.dead&&p.Connected&&!p.Hazard&&!p.Retiring&&!p.ArenaTransfer;
+ static bool NativeFlight(PlayerSlot p)=>p.Hero.cState.superDashing&&p.Hero.superDash&&!string.IsNullOrEmpty(p.Hero.superDash.ActiveStateName)&&!CrystalDashRules.Stopped(p.Hero.superDash.ActiveStateName)&&!CrystalDashRules.Charging(p.Hero.superDash.ActiveStateName);
  static bool Ordinary(GameManager.SceneLoadInfo info){
   string from=Scenes.GetActiveScene().name;
   return info!=null&&info.GetType()==typeof(GameManager.SceneLoadInfo)&&!string.IsNullOrEmpty(info.SceneName)&&!string.IsNullOrEmpty(info.EntryGateName)&&
@@ -56,7 +57,9 @@ internal static class CrystalDashTransit {
    if(room!=f.To){if(room!=f.From)Cancel(p);continue;}
    if(!gm||gm.IsLoadingSceneTransition||!gm.HasFinishedEnteringScene||!s.Gameplay||!p.Ready||p.SpawnPending||!p.Hero.gameObject.activeInHierarchy)continue;
    if(p.InputBlocked||p.Vitals.AtBench||ScriptedParty.Active||CoopEnding.Active||EmergencyWarp.Active(p)){Cancel(p);continue;}
-   if(p.Hero.cState.superDashing){CrystalDashCoop.ContinueFlight(p,f.Count);flights[i]=null;Diagnostics.Write("CRYSTAL room flight restored P"+(i+1)+" linked="+f.Count);continue;}
+   if(NativeFlight(p)){CrystalDashCoop.ContinueFlight(p,f.Count);flights[i]=null;Diagnostics.Write("CRYSTAL room flight restored P"+(i+1)+" linked="+f.Count+" state="+p.Hero.superDash.ActiveStateName);continue;}
+   // Do not accept a stale flag left by a forced Inactive/reset as a flight.
+   if(p.Hero.cState.superDashing)p.Hero.cState.superDashing=false;
    if(f.Entering){f.Attempt+=Time.unscaledDeltaTime;if(f.Attempt>.4f){Cancel(p);using(PlayerContext.Enter(p))ActorRecovery.Reset(p);Diagnostics.Write("CRYSTAL room resume unavailable P"+(i+1)+"; control restored");}continue;}
    TransitionPoint gate=null;
    if(TransitionPoint.TransitionPoints!=null)foreach(var candidate in TransitionPoint.TransitionPoints)if(candidate&&candidate.name==f.Gate){gate=candidate;break;}
@@ -70,9 +73,17 @@ internal static class CrystalDashTransit {
    try{using(PlayerContext.Enter(p)){
     if(right)p.Hero.FaceRight();else p.Hero.FaceLeft();
     p.Hero.cState.transitioning=false;p.Hero.exitedSuperDashing=false;
+    // Vanilla EnterScene has already set no_input / IgnoreInput before this
+    // proxy event. FinishSpawn instead calls RegainControl/AcceptInput. Without
+    // the native preconditions FixedUpdate.Move overwrites the resumed flight
+    // velocity and animation, even while superDashing is reported as true.
+    p.Hero.hero_state=ActorStates.no_input;
+    p.Hero.IgnoreInput();
+    p.Hero.AffectedByGravity(false);
+    p.Hero.StopAnimationControl();
     p.Hero.proxyFSM.SendEvent("HeroCtrl-EnterSuperDash");
    }
-   if(p.Hero.cState.superDashing){CrystalDashCoop.ContinueFlight(p,f.Count);flights[i]=null;}
+   if(NativeFlight(p)){CrystalDashCoop.ContinueFlight(p,f.Count);flights[i]=null;Diagnostics.Write("CRYSTAL native room resume P"+(i+1)+" gate="+f.Gate+" state="+p.Hero.superDash.ActiveStateName+" velocity="+p.Hero.GetComponent<Rigidbody2D>().velocity);}
    }catch(Exception ex){Cancel(p);if(Living(p)&&p.Hero==f.Hero&&p.Ready)using(PlayerContext.Enter(p))ActorRecovery.Reset(p);Diagnostics.Throttled("CRYSTAL native room resume",ex);}
   }
  }

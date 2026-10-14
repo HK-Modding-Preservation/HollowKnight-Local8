@@ -68,6 +68,7 @@ internal static class PickupCard
 	internal static void ObserveCall(Fsm f, PlayerSlot p, string method)
 	{
 		ShadeCloakRitual.ObserveCall(f, p, method);
+		SharedAcquisition.ObserveCall(f, p, method);
 		if (f != null && (bool)f.GameObject && p != null && p.Alive && !collections.ContainsKey(f))
 		{
 			string text = (f.Name + " " + f.GameObject.name).ToLowerInvariant();
@@ -296,6 +297,7 @@ internal static class PickupCard
 	internal static void Created(Fsm f, GameObject objectCreated)
 	{
 		ShadeCloakRitual.Card(f, objectCreated);
+		ScriptedParty.Card(f, objectCreated);
 		CoopSession coopSession = ((Plugin.Self == null) ? null : Plugin.Self.Session);
 		if (coopSession == null || !coopSession.Active || !objectCreated)
 		{

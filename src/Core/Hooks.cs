@@ -30,6 +30,32 @@ internal static class Hooks
 		internal HutongGames.PlayMaker.FsmState State;
 	}
 
+    // Value-type calls retain the original hook delegate without creating a
+    // closure and a second delegate for each received event/Awake/Enable/Start.
+    private interface IFsmCall { void Invoke(HutongGames.PlayMaker.Fsm self); }
+    private struct AwakeCall : IFsmCall
+    {
+        internal On.HutongGames.PlayMaker.Fsm.orig_Awake Original;
+        public void Invoke(HutongGames.PlayMaker.Fsm self) => Original(self);
+    }
+    private struct EnableCall : IFsmCall
+    {
+        internal On.HutongGames.PlayMaker.Fsm.orig_OnEnable Original;
+        public void Invoke(HutongGames.PlayMaker.Fsm self) => Original(self);
+    }
+    private struct StartCall : IFsmCall
+    {
+        internal On.HutongGames.PlayMaker.Fsm.orig_Start Original;
+        public void Invoke(HutongGames.PlayMaker.Fsm self) => Original(self);
+    }
+    private struct EventCall : IFsmCall
+    {
+        internal On.HutongGames.PlayMaker.Fsm.orig_ProcessEvent Original;
+        internal HutongGames.PlayMaker.FsmEvent Event;
+        internal HutongGames.PlayMaker.FsmEventData Data;
+        public void Invoke(HutongGames.PlayMaker.Fsm self) => Original(self, Event, Data);
+    }
+
 	private sealed class SaveScope : IDisposable
 	{
 		private readonly PlayerContext context;
@@ -155,7 +181,10 @@ internal static class Hooks
 
 	private static bool pauseRecoveryCandidate;
 
+	private static float nextPauseControlSnapshot;
+
 	private static readonly Dictionary<Type, FieldInfo[]> referenceFields = new Dictionary<Type, FieldInfo[]>();
+	private static readonly Dictionary<Type, ReferenceField[]> referenceAccesses = new Dictionary<Type, ReferenceField[]>();
 
 	private static readonly Dictionary<HutongGames.PlayMaker.Fsm, EnemyBinding> enemies = new Dictionary<HutongGames.PlayMaker.Fsm, EnemyBinding>();
 
@@ -182,13 +211,20 @@ internal static class Hooks
 		if (!installed)
 		{
 			installed = true;
+			NativeEventSearch.Install();
 			DialogueCleanup.Install();
+			InteractionControlLifecycle.Install();
 			CharmNativeUi.Install();
+			CharmExtensions.Install();
 			CombatEffects.Install();
+			JumpEffectLifetime.Install();
 			PlayerLighting.Install();
 			PvpCombat.Install();
 			VanillaHud.Install();
 			SkinBridge.Install();
+			ElderBaldurRange.Install();
+			MushroomBounceRouting.Install();
+			WorldContactRouting.Install();
 			On.InvCharmBackboard.SelectCharm += SelectBoard;
 			On.CharmItem.GetListNumber += SelectEquipped;
 			On.HeroController.FinishedEnteringScene += Entered;
@@ -291,14 +327,22 @@ internal static class Hooks
 		if (installed)
 		{
 			installed = false;
+			NativeEventSearch.Uninstall();
 			ClearSceneCache();
 			DialogueCleanup.Uninstall();
+			InteractionControlLifecycle.Uninstall();
 			CharmNativeUi.Uninstall();
+			CharmExtensions.Uninstall();
+			PaleCourtInterop.Uninstall();
 			CombatEffects.Uninstall();
+			JumpEffectLifetime.Uninstall();
 			PlayerLighting.Uninstall();
 			PvpCombat.Uninstall();
 			VanillaHud.Uninstall();
 			SkinBridge.Uninstall();
+			ElderBaldurRange.Uninstall();
+			MushroomBounceRouting.Uninstall();
+			WorldContactRouting.Uninstall();
 			On.InvCharmBackboard.SelectCharm -= SelectBoard;
 			On.CharmItem.GetListNumber -= SelectEquipped;
 			On.HeroController.FinishedEnteringScene -= Entered;
@@ -517,6 +561,10 @@ internal static class Hooks
 		{
 			AcidSwimming.GuardPrimary();
 		}
+		if (SharedAcquisition.Posing(playerSlot))
+		{
+			return;
+		}
 		if (playerSlot != null && AcidSwimming.SurfacePose(playerSlot))
 		{
 			return;
@@ -539,10 +587,7 @@ internal static class Hooks
 		{
 			return true;
 		}
-		if (p.Index > 0)
-		{
-			RefreshWalk(p);
-		}
+		RefreshWalk(p);
 		if (Time.unscaledTime < p.WakeUntil)
 		{
 			Controls.Pump(p, block: true);
@@ -573,11 +618,13 @@ internal static class Hooks
 		{
 			return false;
 		}
-		if (!CoopRules.RunHeroFrame(p.Index, p.Ready, p.Down, p.Hazard, p.Retiring, p.InputBlocked, session.Gameplay, p.Reviving))
+		bool gameplay = session.Gameplay;
+		bool bossIntro = !gameplay && BossIntroMotion.Runs(session, p);
+		if (!CoopRules.RunHeroFrame(p.Index, p.Ready, p.Down, p.Hazard, p.Retiring, p.InputBlocked, gameplay || bossIntro, p.Reviving))
 		{
 			return false;
 		}
-		Controls.Pump(p, TransitionVote.Holding(p) || Plugin.Self.Panel || p.Down || p.Hazard || !p.Connected || PvpMatch.BlocksInput);
+		Controls.Pump(p, bossIntro || TransitionVote.Holding(p) || Plugin.Self.Panel || p.Down || p.Hazard || !p.Connected || PvpMatch.BlocksInput);
 		return true;
 	}
 
@@ -593,7 +640,7 @@ internal static class Hooks
 		{
 			orig(self, go, side, amount, hazardType);
 		}
-		else
+		else using (ImpactMetrics.Damage(playerSlot))
 		{
 			if (hazardType == 3 && session.Data.hasAcidArmour)
 			{
@@ -638,7 +685,7 @@ internal static class Hooks
 				}
 				else
 				{
-					orig(self, go, side, amount, hazardType);
+					using(DamageAudioGuard.Damage())using(ImpactMetrics.NativeDamage())orig(self, go, side, amount, hazardType);
 					num2 = session.Data.health + session.Data.healthBlue;
 					flag4 = num2 < num;
 				}
@@ -662,7 +709,7 @@ internal static class Hooks
 				CombatEffects.MarkCombat();
 				playerSlot.LastDamageAt = Time.unscaledTime;
 				playerSlot.DamageFlashUntil = Time.unscaledTime + 0.35f;
-				Diagnostics.Write("DAMAGE P" + (playerSlot.Index + 1) + " hp=" + num + "->" + num2 + " hazard=" + hazardType);
+				Diagnostics.Write("DAMAGE P" + (playerSlot.Index + 1) + " hp=" + num + "->" + num2 + " hazard=" + hazardType + " frame=" + Time.frameCount);
 			}
 		}
 	}
@@ -745,6 +792,7 @@ internal static class Hooks
 		if (session != null && session.Active && self == session.Data)
 		{
 			FlowerRules.BoolChanged(session, self, name, oldValue, value, current);
+			SharedAcquisition.Changed(session, self, name, oldValue ? 1 : 0, value ? 1 : 0);
 		}
 	}
 
@@ -752,6 +800,7 @@ internal static class Hooks
 	{
 		ShadeCloakRitual.LevelChanged(self, name, value);
 		CoopSession session = Session;
+		int oldAbilityLevel = AcquisitionRules.Level(name) && session != null && session.Active && self == session.Data ? self.GetInt(name) : -1;
 		if (session != null && session.Active && self == session.Data && name == "heartPieces" && value > self.heartPieces)
 		{
 			PlayerSlot buyer = ShopMenuRouting.Buyer;
@@ -776,6 +825,7 @@ internal static class Hooks
 			Diagnostics.Write("BLUE HEALTH +" + num + " context=" + ((PlayerContext.Current == null) ? "vanilla" : ("P" + (PlayerContext.Current.Index + 1))));
 		}
 		orig(self, name, value);
+		if (oldAbilityLevel >= 0) SharedAcquisition.Changed(session, self, name, oldAbilityLevel, value);
 	}
 
 	private static void IntAdd(On.PlayerData.orig_IntAdd orig, PlayerData self, string name, int amount)
@@ -1085,7 +1135,7 @@ internal static class Hooks
 	{
 		CoopSession session = Session;
 		p = session?.Resolve(c);
-		if (session != null && session.Active && p != null && p.Index > 0)
+		if (session != null && session.Active && c != null)
 		{
 			return c.gameObject.layer == 9;
 		}
@@ -1130,6 +1180,9 @@ internal static class Hooks
 
 	private static void WalkTouch(WalkArea area, PlayerSlot p, bool inside)
 	{
+		// WalkArea caches a single hero in Start, which can be a guest while a
+		// PlayerContext is active. Never call that shared reference in co-op.
+		if (p == null || !p.Hero || !area) return;
 		if (!walkAreas.TryGetValue(p, out var value))
 		{
 			value = (walkAreas[p] = new HashSet<WalkArea>());
@@ -1147,7 +1200,7 @@ internal static class Hooks
 
 	private static void RefreshWalk(PlayerSlot p)
 	{
-		if (!p.Hero)
+		if (p == null || !p.Hero)
 		{
 			return;
 		}
@@ -1166,7 +1219,9 @@ internal static class Hooks
 				{
 					return true;
 				}
-				return (!heroCollider) ? (!component.bounds.Contains(p.Hero.transform.position)) : (!component.bounds.Intersects(heroCollider.bounds));
+				if (!heroCollider) return !component.OverlapPoint(p.Hero.transform.position);
+				if (!heroCollider.enabled || !heroCollider.gameObject.activeInHierarchy) return true;
+				return !component.bounds.Intersects(heroCollider.bounds) || component.Distance(heroCollider).distance > 0.01f;
 			});
 			flag = value.Count > 0;
 		}
@@ -1189,6 +1244,7 @@ internal static class Hooks
 			return;
 		}
 		InteractionRouter.TriggerContact(self, c, exiting: false);
+		SharedAcquisition.TriggerContact(self.gameObject, playerSlot, exit: false);
 		using (PlayerContext.Enter(playerSlot))
 		{
 			orig(self, c);
@@ -1204,6 +1260,7 @@ internal static class Hooks
 			return;
 		}
 		InteractionRouter.TriggerContact(self, c, exiting: false);
+		SharedAcquisition.TriggerContact(self.gameObject, playerSlot, exit: false);
 		using (PlayerContext.Enter(playerSlot))
 		{
 			orig(self, c);
@@ -1219,6 +1276,7 @@ internal static class Hooks
 			return;
 		}
 		InteractionRouter.TriggerContact(self, c, exiting: true);
+		SharedAcquisition.TriggerContact(self.gameObject, playerSlot, exit: true);
 		using (PlayerContext.Enter(playerSlot))
 		{
 			orig(self, c);
@@ -1243,9 +1301,13 @@ internal static class Hooks
 	{
 		CoopSession session = Session;
 		PlayerSlot playerSlot = HeroPlayer(self);
-		if (session == null || !session.Active || session.AllowVanillaDeath || playerSlot == null)
+		if (session == null || !session.Active || playerSlot == null)
 		{
 			return orig(self);
+		}
+		if (PartyDeath.NativeHero(playerSlot, self))
+		{
+			return PartyDeath.HeroRoutine(() => orig(self));
 		}
 		session.Down(playerSlot);
 		return Empty();
@@ -1495,6 +1557,7 @@ internal static class Hooks
 	{
 		CoopSession session = Session;
 		PlayerSlot p = PlayerContext.Current ?? InteractionRouter.ActivePlayer ?? session?.Primary;
+		if (MenuInput.EscapeConsumed || Plugin.Self != null && Plugin.Self.Panel && !self.isPaused) return Empty();
 		if (session != null && session.Active && !self.isPaused && (EmergencyWarp.Active(p) || EmergencyWarp.Holding(p)))
 		{
 			return Empty();
@@ -1506,8 +1569,9 @@ internal static class Hooks
 	{
 		UIManager instance = UIManager.instance;
 		PlayerSlot activePlayer = InteractionRouter.ActivePlayer;
-		bool flag = ShopMenuRouting.Buyer != null || StagMenuRouting.HasOwner || PickupCard.Owner != null || activePlayer != null;
-		if (s.Data.disablePause && flag)
+		bool interaction = ShopMenuRouting.Buyer != null || StagMenuRouting.HasOwner || PickupCard.Owner != null || activePlayer != null;
+		bool flag = ShopMenuRouting.Buyer != null && ShopMenuRouting.MenuVisible || StagMenuRouting.HasOwner || PickupCard.Owner != null || activePlayer != null && !InteractionRouter.ActiveIsBench;
+		if (s.Data.disablePause && interaction)
 		{
 			pauseRecoveryCandidate = true;
 		}
@@ -1522,7 +1586,7 @@ internal static class Hooks
 		}
 		foreach (PlayerSlot player in s.Players)
 		{
-			if (player.Ready && player.Alive && (player.Hero.controlReqlinquished || EmergencyWarp.Active(player) || EmergencyWarp.Holding(player)))
+			if (player.Ready && player.Alive && (player.Hero.controlReqlinquished && !(player != s.Primary && BenchSeats.Seated(player)) || EmergencyWarp.Active(player) || EmergencyWarp.Holding(player)))
 			{
 				lastPauseModalAt = Time.unscaledTime;
 				return false;
@@ -1548,7 +1612,7 @@ internal static class Hooks
 				self.AttachHeroController(playerSlot.Hero);
 			}
 			bool flag2 = FreeToPause(session, instance, self);
-			if (KeypadInput.Pressed(KeyCode.Escape) && instance.gameState == GameState.PLAYING)
+			if (!MenuInput.EscapeConsumed && KeypadInput.Pressed(KeyCode.Escape) && instance.gameState == GameState.PLAYING)
 			{
 				if (flag2 && session.Data.disablePause && pauseRecoveryCandidate)
 				{
@@ -1562,7 +1626,12 @@ internal static class Hooks
 				}
 				else if (!flag2 || session.Data.disablePause)
 				{
-					Diagnostics.Write("PAUSE denied accepting=" + self.acceptingInput + " allowed=" + self.pauseAllowed + " disable=" + session.Data.disablePause + " bindings=" + self.inputActions.pause.Bindings.Count + " primaryReady=" + session.Primary.Ready + " scripted=" + ScriptedParty.Active);
+					Diagnostics.Write("PAUSE denied accepting=" + self.acceptingInput + " allowed=" + self.pauseAllowed + " disable=" + session.Data.disablePause + " bindings=" + self.inputActions.pause.Bindings.Count + " primaryReady=" + session.Primary.Ready + " scripted=" + ScriptedParty.Active + " panel=" + Plugin.Self.Panel + " charms=" + Charms.NativeMenuOpen + " interaction=" + (InteractionRouter.ActivePlayer == null ? "none" : "P" + (InteractionRouter.ActivePlayer.Index + 1)) + " bench=" + InteractionRouter.ActiveIsBench + " ui=" + (UIManager.instance ? UIManager.instance.uiState.ToString() : "missing") + " primaryControl=" + (session.Primary.Hero && session.Primary.Hero.controlReqlinquished));
+					if (Time.unscaledTime >= nextPauseControlSnapshot)
+					{
+						nextPauseControlSnapshot = Time.unscaledTime + 1f;
+						Diagnostics.ControlSnapshot(session, "pause-denied");
+					}
 				}
 			}
 		}
@@ -1580,9 +1649,9 @@ internal static class Hooks
 
 	private static IEnumerator PlayerDead(On.GameManager.orig_PlayerDead orig, GameManager self, float wait)
 	{
-		if (PlayerContext.Current != null && PlayerContext.Current.Index != 0)
+		if (Session != null && Session.Active)
 		{
-			return Empty();
+			return PartyDeath.ManagerRoutine(() => orig(self, wait));
 		}
 		return orig(self, wait);
 	}
@@ -1612,10 +1681,13 @@ internal static class Hooks
 
 	private static GameObject PoolSpawn(On.ObjectPool.orig_Spawn_GameObject_Transform_Vector3_Quaternion orig, GameObject prefab, Transform parent, Vector3 position, Quaternion rotation)
 	{
-		GameObject gameObject = orig(prefab, parent, position, rotation);
-		Spawned(gameObject);
-		SummonRouting.Observed(prefab, parent, gameObject);
-		return gameObject;
+		using (ImpactMetrics.PooledEffect())
+		{
+			GameObject gameObject = orig(prefab, parent, position, rotation);
+			Spawned(gameObject);
+			SummonRouting.Observed(prefab, parent, gameObject);
+			return gameObject;
+		}
 	}
 
 	private static void HatchlingFixed(On.KnightHatchling.orig_FixedUpdate orig, KnightHatchling self)
@@ -1654,6 +1726,7 @@ internal static class Hooks
 	private static void Spawned(GameObject result)
 	{
 		SpellSafety.Spawned(result);
+		WeaverlingLifetime.Spawned(result, PlayerContext.Current);
 		NativeDashEffects.Spawned(result);
 		CrystalDashCoop.Spawned(result);
 	}
@@ -1666,6 +1739,8 @@ internal static class Hooks
 	private static void SpellCreateAction(On.HutongGames.PlayMaker.Actions.CreateObject.orig_OnEnter orig, HutongGames.PlayMaker.Actions.CreateObject self)
 	{
 		SpellSafety.Create(orig, self);
+		if (self.storeObject != null)
+			WeaverlingLifetime.Spawned(self.storeObject.Value, Session?.Resolve(self.Fsm) ?? PlayerContext.Current);
 	}
 
 	internal static void SpellBorn(GameObject projectile, PlayerSlot caster)
@@ -1727,6 +1802,7 @@ internal static class Hooks
 
 	private static void EnemyUpdate(On.LineOfSightDetector.orig_Update orig, LineOfSightDetector self)
 	{
+		if (WalkerTargeting.Sight(orig, self)) return;
 		CoopSession session = Session;
 		using (PlayerContext.Enter((session != null && session.Active) ? session.Nearest(self.transform.position) : null, enemy: true))
 		{
@@ -1738,6 +1814,7 @@ internal static class Hooks
 	{
 		orig(self);
 		ScriptedParty.SpellOrb(self);
+		SharedAcquisition.SpellOrb(self);
 	}
 
 	private static PlayerSlot FsmPlayer(HutongGames.PlayMaker.Fsm fsm, out bool enemy)
@@ -1748,12 +1825,14 @@ internal static class Hooks
 		{
 			return null;
 		}
+		PlayerSlot mushroomOwner = MushroomBounceRouting.Resolve(fsm);
+		if (mushroomOwner != null) return mushroomOwner;
 		if (AcidSwimming.WorldSurface(fsm))
 		{
 			return session.Primary;
 		}
 		PlayerSlot playerSlot = PickupCard.Resolve(fsm) ?? StagMenuRouting.Resolve(fsm) ?? ShopMenuRouting.Resolve(fsm) ?? session.Resolve(fsm) ?? InteractionRouter.Resolve(fsm) ?? Lifeblood.Resolve(fsm) ?? ArenaGather.Resolve(fsm) ?? WorldRouting.Resolve(fsm);
-		if (playerSlot == null && (bool)fsm.GameObject)
+		if ((playerSlot == null || (playerSlot.Down && session.Resolve(fsm) == null)) && (bool)fsm.GameObject)
 		{
 			if (!enemies.TryGetValue(fsm, out var value))
 			{
@@ -1772,7 +1851,7 @@ internal static class Hooks
 		}
 		PlayerSlot playerSlot2 = playerSlot;
 		GameObject gameObject = fsm.GameObject;
-		if ((bool)gameObject && gameObject.name.ToLowerInvariant().Contains("soul"))
+		if ((bool)gameObject && InvariantText.Lower(gameObject.name).Contains("soul"))
 		{
 			if (playerSlot2 == null)
 			{
@@ -1793,78 +1872,92 @@ internal static class Hooks
 		}
 		goto IL_018a;
 		IL_018a:
-		return playerSlot2;
+		return SharedAcquisition.Route(playerSlot2, fsm);
 	}
 
 	internal static void ClearSceneCache()
 	{
+		JumpEffectLifetime.Reset();
+		RoarMotionRecovery.Reset();
+		InvariantText.Clear();
+		NativeEventSearch.Reset();
+		PartyDeath.Reset();
+		ElderBaldurRange.Reset();
+		MushroomBounceRouting.Reset();
+		WorldContactRouting.Reset();
+		SharedAcquisition.Reset();
 		AcidSwimming.Reset();
 		NativeQuickMap.Reset();
 		fsmBindings.Clear();
 		enemies.Clear();
 		walkAreas.Clear();
+		WeaverlingLifetime.Reset();
 		familiarDamageLogged.Clear();
 		lastDamageCount = -1;
 		lastPauseModalAt = Time.unscaledTime;
+		nextPauseControlSnapshot = 0f;
 		ShadeCloakRitual.Reset();
 		RadianceAscentCheckpoint.Reset();
 		CrystalDashCoop.Reset();
 		DreamRescueFeedback.Reset();
 	}
 
-	private static void RunFsm(Action action, HutongGames.PlayMaker.Fsm self, bool frame)
+	private static void RunFsm<T>(T action, HutongGames.PlayMaker.Fsm self, bool frame, ref DamageEventMetrics.Trace trace) where T : struct, IFsmCall
 	{
 		bool enemy;
 		PlayerSlot playerSlot = FsmPlayer(self, out enemy);
+		trace.Mark(DamageEventMetrics.Phase.Route);
 		if ((frame && playerSlot != null && (ShadeCloakRitual.HoldsFsm(playerSlot, self) || playerSlot.InputBlocked || playerSlot.Down || playerSlot.Hazard || playerSlot.Retiring || !playerSlot.Ready || (playerSlot.Index > 0 && Charms.NativeMenuOpen) || (Plugin.Self.Panel && Charms.Editing && playerSlot.Index == Charms.Selected))) || (frame && playerSlot != null && Session.Resolve(self) == playerSlot && self.Name == "Spell Control" && (playerSlot.Reviving || (!playerSlot.FocusReleased && playerSlot.Actions != null && playerSlot.Actions.cast.IsPressed))))
 		{
 			return;
 		}
+		try
+		{
 		using (PlayerContext.Enter(playerSlot, enemy))
 		{
 			using (CharmNativeUi.Enter(self))
 			{
 				using (Lifeblood.Enter(self))
 				{
+					trace.Mark(DamageEventMetrics.Phase.Context);
 					Retarget(self, playerSlot);
 					WorldRouting.Call before = WorldRouting.Begin(self);
+					trace.Mark(DamageEventMetrics.Phase.Bind);
 					try
 					{
-						action();
+						action.Invoke(self);
 					}
 					finally
 					{
+						trace.Mark(DamageEventMetrics.Phase.Native);
 						WorldRouting.End(self, before);
+						trace.Mark(DamageEventMetrics.Phase.World);
 					}
 				}
 			}
 		}
+		}
+		finally { trace.Mark(DamageEventMetrics.Phase.Restore); }
 	}
 
 	private static void FsmAwake(On.HutongGames.PlayMaker.Fsm.orig_Awake orig, HutongGames.PlayMaker.Fsm self)
 	{
-		RunFsm(delegate
-		{
-			orig(self);
-		}, self, frame: false);
+		var trace = default(DamageEventMetrics.Trace);
+		RunFsm(new AwakeCall { Original = orig }, self, false, ref trace);
 	}
 
 	private static void FsmEnable(On.HutongGames.PlayMaker.Fsm.orig_OnEnable orig, HutongGames.PlayMaker.Fsm self)
 	{
-		RunFsm(delegate
-		{
-			orig(self);
-		}, self, frame: false);
+		var trace = default(DamageEventMetrics.Trace);
+		RunFsm(new EnableCall { Original = orig }, self, false, ref trace);
 		PvpCombat.TrackFsm(self);
 	}
 
 	private static void FsmStart(On.HutongGames.PlayMaker.Fsm.orig_Start orig, HutongGames.PlayMaker.Fsm self)
 	{
 		InteractionRouter.Ready(self);
-		RunFsm(delegate
-		{
-			orig(self);
-		}, self, frame: false);
+		var trace = default(DamageEventMetrics.Trace);
+		RunFsm(new StartCall { Original = orig }, self, false, ref trace);
 		PvpCombat.TrackFsm(self);
 	}
 
@@ -1875,6 +1968,11 @@ internal static class Hooks
 		bool enemy;
 		PlayerSlot playerSlot = FsmPlayer(self.Fsm, out enemy);
 		ChallengeSequence.ObserveState(self, playerSlot);
+		SharedAcquisition.ObserveState(self, playerSlot);
+		var previousControlSource = InteractionControlLifecycle.Source;
+		InteractionControlLifecycle.Source = self.Fsm;
+		try
+		{
 		using (PlayerContext.Enter(playerSlot, enemy))
 		{
 			using (CharmNativeUi.Enter(self.Fsm))
@@ -1893,6 +1991,8 @@ internal static class Hooks
 				orig(self);
 			}
 		}
+		}
+		finally { InteractionControlLifecycle.Source = previousControlSource; }
 		BenchSeats.Observe(self.Fsm, playerSlot);
 		RadianceAscentCheckpoint.Observed(self);
 		ChallengeAnimationSync.AfterState(self);
@@ -2017,6 +2117,11 @@ internal static class Hooks
 
 	private static void FsmEvent(On.HutongGames.PlayMaker.Fsm.orig_ProcessEvent orig, HutongGames.PlayMaker.Fsm self, HutongGames.PlayMaker.FsmEvent evt, HutongGames.PlayMaker.FsmEventData data)
 	{
+		var trace = DamageEventMetrics.Begin(self);
+		try
+		{
+		if (PartyDeath.BlockEvent(self, evt, data)) return;
+		if (ElderBaldurRange.BlockFar(self, evt)) return;
 		ShadeCloakRitual.BeforeEvent(self, evt, data);
 		HutongGames.PlayMaker.Fsm self2 = self;
 		HutongGames.PlayMaker.FsmEvent evt2 = evt;
@@ -2037,7 +2142,7 @@ internal static class Hooks
 		}
 		PlayerSlot current = PlayerContext.Current;
 		CoopSession session = Session;
-		if (session != null && session.Active && current != null && evt2 != null && localEvents.Contains(evt2.Name))
+		if (session != null && session.Active && current != null && evt2 != null && localEvents.Contains(evt2.Name) && !PartyDeath.IsDeath(evt2))
 		{
 			PlayerSlot playerSlot = session.Resolve(self2);
 			if (playerSlot != null && playerSlot != current)
@@ -2045,21 +2150,22 @@ internal static class Hooks
 				return;
 			}
 		}
-		if (session != null && session.Active && current != null && current.Index > 0 && evt2 != null && IsVitalsHud(self2) && (localEvents.Contains(evt2.Name) || evt2.Name.StartsWith("MP ") || evt2.Name == "ADD BLUE HEALTH"))
+		if (session != null && session.Active && current != null && current.Index > 0 && evt2 != null && SuppressedHudEvent(self2, evt2))
 		{
 			return;
 		}
+		SharedAcquisition.BeforeEvent(self2, evt2, data2);
+		trace.Mark(DamageEventMetrics.Phase.Guard);
 		try
 		{
-			RunFsm(delegate
-			{
-				orig(self2, evt2, data2);
-			}, self2, frame: false);
+			RunFsm(new EventCall { Original = orig, Event = evt2, Data = data2 }, self2, false, ref trace);
 		}
 		finally
 		{
 			StagMenuRouting.AfterEvent(self2, evt2);
 		}
+		}
+		finally { trace.Dispose(); }
 	}
 
 	private static void ShareRoar(HutongGames.PlayMaker.Fsm source, HutongGames.PlayMaker.FsmEvent evt)
@@ -2236,10 +2342,16 @@ internal static class Hooks
 			Reflect.Set(self, "component", null);
 		}
 		PickupCard.ObserveCall(self.Fsm, playerSlot, (self.methodName == null) ? null : self.methodName.Value);
+		var previousControlSource = InteractionControlLifecycle.Source;
+		InteractionControlLifecycle.Source = self.Fsm;
+		try
+		{
 		using (PlayerContext.Enter(playerSlot))
 		{
 			orig(self);
 		}
+		}
+		finally { InteractionControlLifecycle.Source = previousControlSource; }
 	}
 
 	private static void CreatePickupCard(On.HutongGames.PlayMaker.Actions.CreateUIMsgGetItem.orig_OnEnter orig, HutongGames.PlayMaker.Actions.CreateUIMsgGetItem self)
@@ -2420,6 +2532,17 @@ internal static class Hooks
 		return true;
 	}
 
+    private static bool SuppressedHudEvent(HutongGames.PlayMaker.Fsm f, HutongGames.PlayMaker.FsmEvent evt)
+    {
+        string name = evt.Name;
+        // Preserve the old malformed-name behavior, including its exception
+        // only when the receiver is a vitals HUD. Normal event names can reject
+        // this guard before querying camera/canvas ancestry for every receiver.
+        if (name == null)
+            return IsVitalsHud(f) && (localEvents.Contains(name) || name.StartsWith("MP ") || name == "ADD BLUE HEALTH");
+        return (localEvents.Contains(name) || name.StartsWith("MP ") || name == "ADD BLUE HEALTH") && IsVitalsHud(f);
+    }
+
 	[IteratorStateMachine(typeof(__iterator__Empty_d__134))]
 	private static IEnumerator Empty()
 	{
@@ -2489,6 +2612,17 @@ internal static class Hooks
 		return value;
 	}
 
+	internal static ReferenceField[] GetReferenceAccesses(Type type)
+	{
+		ReferenceField[] value;
+		if (referenceAccesses.TryGetValue(type, out value)) return value;
+		FieldInfo[] fields = GetReferenceFields(type);
+		value = new ReferenceField[fields.Length];
+		for (int i = 0; i < value.Length; i++) value[i] = ReferenceField.For(fields[i]);
+		referenceAccesses[type] = value;
+		return value;
+	}
+
 	internal static UnityEngine.Object Mapped(UnityEngine.Object value, PlayerSlot p)
 	{
 		if (!value)
@@ -2551,21 +2685,21 @@ internal static class Hooks
 		{
 			return;
 		}
-		FieldInfo[] array = GetReferenceFields(obj.GetType());
-		foreach (FieldInfo fieldInfo in array)
+		ReferenceField[] array = GetReferenceAccesses(obj.GetType());
+		foreach (ReferenceField fieldInfo in array)
 		{
 			Type fieldType = fieldInfo.FieldType;
-			if (fieldType == typeof(HeroControllerStates))
+			if (fieldInfo.Binding == ReferenceField.BindingKind.HeroState)
 			{
 				fieldInfo.SetValue(obj, p.Hero.cState);
 				continue;
 			}
-			if (fieldType == typeof(PlayerData))
+			if (fieldInfo.Binding == ReferenceField.BindingKind.Data)
 			{
 				fieldInfo.SetValue(obj, Session.Data);
 				continue;
 			}
-			if (fieldType == typeof(HeroActions))
+			if (fieldInfo.Binding == ReferenceField.BindingKind.Actions)
 			{
 				fieldInfo.SetValue(obj, p.Actions);
 				continue;

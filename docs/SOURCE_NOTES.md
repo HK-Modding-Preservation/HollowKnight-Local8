@@ -1,9 +1,11 @@
-# Hollow Knight 8-Player Co-op source notes
+# Source notes
 
-The public v0.10.0 package is a consolidated, complete C# tree based on the latest Work alpha186 DLL and its feature sources. `src/Core/` recovers the final core behavior, including later integration patches; `src/Features/` contains the current feature implementations. Embedded artwork and translation tables are under `assets/`.
+Public **v0.11.0** contains the complete alpha227-based production source. Only release version metadata changes from that private build. Existing namespace, public mod identity, embedded-resource IDs, configuration keys and save/profile identifiers are retained.
 
-The earlier development pipeline applied integrations to a base binary. This public source does not require that binary, a merger or old builds. The final public DLL is compiled directly from this source tree. A second build from the extracted source package verifies byte-for-byte equality with the distributed DLL using the same SDK and Modding API game references.
+The DLL compiles directly from C# and embedded mod-owned assets; it does not require an older mod binary, a merger, or game files inside the source package. An extracted source-package build is checked against the release DLL using the same SDK and Managed references. The installation ZIP contains only the canonical DLL.
 
-A small number of recovered native coroutines retain explicit iterator state machines. Their private identifiers were made legal C# identifiers while preserving state, completion and disposal behavior. Types consumed by feature code have the internal visibility needed for a single-assembly build. Existing public mod classes, namespace, assembly filename, settings fields, save IDs and resource IDs remain compatible.
+Recovered native coroutines retain explicit iterator state machines where needed. Their identifiers remain legal C# while preserving state, completion and disposal. Controlled tests and frozen mod-source comparisons are under `tests`; native IL used by world-interaction tests comes from the user's own Managed references at test time.
 
-The source package deliberately excludes all DLLs, game/Team Cherry libraries, previous builds, local reference paths, logs, temporary files and debug output. It includes no new license grant beyond the repository's existing terms.
+Private gameplay logs, user-specific diagnostics, local build paths, compiler output, game/Team Cherry libraries and SDK files are excluded. See [building](BUILDING.md) and [release validation](VALIDATION_v0.11.0.md).
+
+No new license grant is introduced beyond the repository's existing terms.

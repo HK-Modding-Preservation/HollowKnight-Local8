@@ -22,6 +22,16 @@ public sealed class Local8Settings
 
 	public bool GroupDarkness;
 
+	public bool PerformanceMode;
+
+	public PerformanceConfiguration Performance = new PerformanceConfiguration();
+
+	public bool PlayerLights = true;
+
+	public bool SmoothPlayerLights = true;
+
+	public PlayerProfileData[] PlayerProfiles = new PlayerProfileData[0];
+
 	public bool WaitForParty = true;
 
 	public bool SpawnShades;
@@ -64,6 +74,10 @@ public sealed class Local8Settings
 
 	public bool PvpSoulOnHit = true;
 
+	public bool PvpSpellsOnly;
+
+	public int PvpSoulRegeneration = PvpSpellOnly.DefaultRegeneration;
+
 	public int[] PvpTeams = new int[8];
 
 	public string PrimaryDevice = "Keyboard";
@@ -90,11 +104,14 @@ public sealed class Local8Settings
 
 	public void Ensure()
 	{
+		if (Performance == null) Performance = new PerformanceConfiguration();
+		Performance.Ensure(PerformanceMode, ReduceHitEffects);
 		PvpMode = Mathf.Clamp(PvpMode, 0, 2);
 		PvpNailDamage = Mathf.Clamp(PvpNailDamage, 1, 5);
 		PvpSpellDamage = Mathf.Clamp(PvpSpellDamage, 1, 5);
 		PvpArtDamage = Mathf.Clamp(PvpArtDamage, 1, 5);
 		PvpCharmDamage = Mathf.Clamp(PvpCharmDamage, 1, 5);
+		PvpSoulRegeneration = PvpSpellOnly.Rate(PvpSoulRegeneration);
 		DuelSoul = Mathf.Clamp(DuelSoul, 0, 99);
 		DuelSeconds = Mathf.Clamp(DuelSeconds, 0, 600);
 		DuelBestOf = PvpRules.SeriesLength(DuelBestOf);

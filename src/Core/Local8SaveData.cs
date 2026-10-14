@@ -9,4 +9,6 @@ public sealed class Local8SaveData
 	public string[] RoleIds;
 
 	public int SharedSoulState;
+
+	public PlayerAdventureStatistics[] AdventureStats;
 }

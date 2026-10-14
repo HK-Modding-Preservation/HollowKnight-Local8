@@ -31,6 +31,8 @@ public sealed class Local8Mod : Mod, IGlobalSettings<Local8Settings>, ILocalSett
 		if ((bool)runtime)
 		{
 			Charms.Save(runtime.Session);
+			PlayerProfiles.Capture(runtime.Session);
+			PlayerProfiles.Flush(runtime.Session);
 		}
 		return Save;
 	}
@@ -80,6 +82,7 @@ public sealed class Local8Mod : Mod, IGlobalSettings<Local8Settings>, ILocalSett
 		Settings = settings ?? new Local8Settings();
 		Settings.Ensure();
 		PvpRoundClock.Migrate();
+		PlayerProfiles.Normalize();
 	}
 
 	public Local8Settings OnSaveGlobal()
@@ -87,6 +90,7 @@ public sealed class Local8Mod : Mod, IGlobalSettings<Local8Settings>, ILocalSett
 		if ((bool)runtime)
 		{
 			runtime.ExportSettings();
+			PlayerProfiles.Capture(runtime.Session);
 		}
 		return Settings;
 	}

@@ -37,12 +37,14 @@ internal static class PlayerLighting
 	internal static void Install()
 	{
 		Camera.onPreCull = (Camera.CameraCallback)Delegate.Combine(Camera.onPreCull, new Camera.CameraCallback(BeforeCamera));
+		Camera.onPreRender += FocusBackdropGuard.BeforeRender;
 		Camera.onPostRender = (Camera.CameraCallback)Delegate.Combine(Camera.onPostRender, new Camera.CameraCallback(AfterCamera));
 	}
 
 	internal static void Uninstall()
 	{
 		Camera.onPreCull = (Camera.CameraCallback)Delegate.Remove(Camera.onPreCull, new Camera.CameraCallback(BeforeCamera));
+		Camera.onPreRender -= FocusBackdropGuard.BeforeRender;
 		Camera.onPostRender = (Camera.CameraCallback)Delegate.Remove(Camera.onPostRender, new Camera.CameraCallback(AfterCamera));
 		Reset();
 	}
@@ -50,6 +52,8 @@ internal static class PlayerLighting
 	internal static void Reset()
 	{
 		RestoreMasks();
+		NativeRenderBudget.Reset();
+		FocusBackdropGuard.Reset();
 		visibility.Dispose();
 		foreach (Layer layer in layers)
 		{
@@ -161,6 +165,7 @@ internal static class PlayerLighting
 	{
 		//Discarded unreachable code: IL_007e
 		ArenaVisualRecovery.BeforeCamera(camera);
+		NativeRenderBudget.BeforeCamera(camera);
 		Local8Runtime self = Plugin.Self;
 		CoopSession coopSession = ((self == null) ? null : self.Session);
 		if (coopSession == null || !self.Enabled.Value || !coopSession.Active || coopSession.TeamWipe || coopSession.Primary == null || !coopSession.Primary.Hero)
@@ -171,11 +176,13 @@ internal static class PlayerLighting
 		GameManager instance2 = GameManager.instance;
 		if (!instance || instance.mainCamera != camera || !instance.mainCamera || !instance2 || !instance2.IsGameplayScene() || instance2.IsLoadingSceneTransition)
 		{
+			FocusBackdropGuard.BeforeCamera(camera);
 			return;
 		}
 		try
 		{
 			Probe(coopSession.Primary.Hero);
+			FocusBackdropGuard.BeforeCamera(camera);
 			foreach (PlayerSlot player in coopSession.Players)
 			{
 				if (player.Index > 0 && (bool)player.Hero)
@@ -188,7 +195,7 @@ internal static class PlayerLighting
 			renderingCamera = camera;
 			foreach (Layer layer in layers)
 			{
-				if (layer.Light && (bool)layer.Source && layer.Composite.Render(camera, instance.mainCamera, coopSession, layer.Source, light: true))
+				if (self.PlayerLights.Value && layer.Light && (bool)layer.Source && layer.Composite.Render(camera, instance.mainCamera, coopSession, layer.Source, light: true))
 				{
 					num++;
 				}
@@ -233,6 +240,7 @@ internal static class PlayerLighting
 		{
 			layer.Composite.Finish(camera);
 		}
+		FocusBackdropGuard.AfterCamera(camera);
 	}
 
 	private static void Suppress(PlayerSlot p)

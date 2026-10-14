@@ -531,7 +531,7 @@ internal static class PvpCombat
 				CorrectSpellOwner(session, value);
 			}
 			value.WasActive = flag;
-			if (flag && !value.Swing.Parried && CanAttack(value.Owner) && session.Resolve(value.Collider) == value.Owner && (value.Kind != PvpKind.Charm || Local8Mod.Settings.PvpCharmAttacks))
+			if (flag && !value.Swing.Parried && PvpSpellOnly.Allows(value) && CanAttack(value.Owner) && session.Resolve(value.Collider) == value.Owner && (value.Kind != PvpKind.Charm || Local8Mod.Settings.PvpCharmAttacks))
 			{
 				active.Add(value);
 			}
@@ -672,6 +672,10 @@ internal static class PvpCombat
 	private static void CorrectSpellOwner(CoopSession s, Attack a)
 	{
 		//Discarded unreachable code: IL_0286
+		if (a.Kind != PvpKind.Spell || !a.Collider || a.Owner == null || !a.Owner.Hero)
+		{
+			return;
+		}
 		PlayerSlot playerSlot = null;
 		float num = 6.25f;
 		foreach (PlayerSlot player in s.Players)
@@ -685,10 +689,6 @@ internal static class PvpCombat
 					playerSlot = player;
 				}
 			}
-		}
-		if (a.Kind != PvpKind.Spell || !a.Collider || a.Owner == null || !a.Owner.Hero)
-		{
-			return;
 		}
 		GameObject gameObject;
 		if (playerSlot != null && playerSlot != a.Owner && Time.unscaledTime - lastCast[a.Owner.Index] > 0.6f)
@@ -745,6 +745,7 @@ internal static class PvpCombat
 
 	private static void Apply(Contact contact)
 	{
+		if(!PvpSpellOnly.Allows(contact.Attack))return;
 		contact = CrystalDashCoop.PvpDamage(contact);
 		Attack attack = contact.Attack;
 		PlayerSlot target = contact.Target;

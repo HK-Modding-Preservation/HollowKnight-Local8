@@ -11,6 +11,10 @@ internal static class VanillaHud
 	private static readonly List<Renderer> renderers = new List<Renderer>(160);
 
 	private static int scanned = -1;
+	private static GameObject canvas;
+	private static readonly List<Transform> vitalRoots = new List<Transform>();
+	private static float nextDiscovery;
+	private static int canvasChildren;
 
 	private static bool installed;
 
@@ -46,21 +50,29 @@ internal static class VanillaHud
 		}
 		hidden.Clear();
 		renderers.Clear();
+		vitalRoots.Clear(); canvas = null; nextDiscovery = 0f; canvasChildren = -1;
 		scanned = -1;
 	}
 
-	private static bool Vitals(Transform t, Transform root)
+	private static Transform Vitals(Transform t, Transform root)
 	{
+		Transform found = null;
 		while ((bool)t && t != root)
 		{
 			string name = t.name;
 			if (name.IndexOf("health", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("soul", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("orb", StringComparison.OrdinalIgnoreCase) >= 0)
 			{
-				return true;
+				found = t;
 			}
 			t = t.parent;
 		}
-		return false;
+		return found;
+	}
+	private static void Collect(Transform root)
+	{
+		renderers.Clear(); root.GetComponentsInChildren(includeInactive: true, renderers);
+		foreach (Renderer renderer in renderers)
+			if (renderer && !hidden.ContainsKey(renderer)) hidden[renderer] = renderer.forceRenderingOff;
 	}
 
 	private static void BeforeCamera(Camera camera)
@@ -84,16 +96,24 @@ internal static class VanillaHud
 		}
 		if (scanned != Time.frameCount)
 		{
+			if (canvas != instance2.hudCanvas) { Restore(); canvas = instance2.hudCanvas; }
 			scanned = Time.frameCount;
-			renderers.Clear();
-			instance2.hudCanvas.GetComponentsInChildren(includeInactive: true, renderers);
-			foreach (Renderer renderer in renderers)
+			if (Time.unscaledTime >= nextDiscovery || canvasChildren != canvas.transform.childCount)
 			{
-				if ((bool)renderer && !hidden.ContainsKey(renderer) && Vitals(renderer.transform, instance2.hudCanvas.transform))
+				nextDiscovery = Time.unscaledTime + .5f; canvasChildren = canvas.transform.childCount;
+				vitalRoots.Clear(); renderers.Clear();
+				canvas.GetComponentsInChildren(includeInactive: true, renderers);
+				foreach (Renderer renderer in renderers)
 				{
-					hidden[renderer] = renderer.forceRenderingOff;
+					if (!renderer) continue;
+					Transform root = Vitals(renderer.transform, canvas.transform);
+					if (root && !vitalRoots.Contains(root)) vitalRoots.Add(root);
 				}
 			}
+			// Still scan the actual health/soul roots every frame. Newly created
+			// damage masks are hidden immediately, without walking all inventory,
+			// journal, map and shop renderers on every camera pass.
+			foreach (Transform root in vitalRoots) if (root) Collect(root);
 		}
 		foreach (KeyValuePair<Renderer, bool> item in hidden)
 		{

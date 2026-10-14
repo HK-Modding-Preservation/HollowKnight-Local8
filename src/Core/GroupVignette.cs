@@ -45,7 +45,16 @@ internal sealed class GroupVignette : IDisposable
 
 	private readonly LightPoint[] blendCentres = new LightPoint[8];
 
-	private readonly double[] blendScratch = new double[8];
+	private readonly LightBlendGrid blendGrid = new LightBlendGrid();
+
+	private readonly List<LightWeightedVertex> blendVertices = new List<LightWeightedVertex>(1024);
+
+	private readonly LightEdgeFade edgeFade = new LightEdgeFade();
+
+	private LightPoint[] projectedRim;
+	private LightVertex[] projectedVertices;
+
+	private Vector2 lightShift;
 
 	private float viewWidth;
 
@@ -58,6 +67,8 @@ internal sealed class GroupVignette : IDisposable
 	private bool lastFlipX;
 
 	private bool lastFlipY;
+	private bool lastReducedDetail;
+	private bool lastSmooth;
 
 	private Matrix4x4 previousProjection;
 
@@ -121,20 +132,7 @@ internal sealed class GroupVignette : IDisposable
 			{
 				continue;
 			}
-			Vector2 vector2 = gameCamera.WorldToViewportPoint(player.Hero.transform.position);
-			bool flag = false;
-			for (int i = 0; i < num2; i++)
-			{
-				if ((centres[i] - vector2).sqrMagnitude < 0f)
-				{
-					flag = true;
-					break;
-				}
-			}
-			if (!flag)
-			{
-				centres[num2++] = vector2;
-			}
+			centres[num2++] = gameCamera.WorldToViewportPoint(player.Hero.transform.position);
 		}
 		if (num2 == 0)
 		{
@@ -144,7 +142,9 @@ internal sealed class GroupVignette : IDisposable
 		Matrix4x4 projectionMatrix = camera.projectionMatrix;
 		Matrix4x4 localToWorldMatrix = camera.transform.localToWorldMatrix;
 		Matrix4x4 localToWorldMatrix2 = source.transform.localToWorldMatrix;
-		bool flag2 = !built || oldCount != num2 || projectionMatrix != previousProjection || localToWorldMatrix != previousCamera || localToWorldMatrix2 != previousSource || source.color != previousTint || source.flipX != lastFlipX || source.flipY != lastFlipY || vector != previousPrimary;
+		bool reducedDetail = PerformanceTuning.Detail > 0;
+		bool smooth = Plugin.Self.SmoothPlayerLights.Value;
+		bool flag2 = !built || oldCount != num2 || projectionMatrix != previousProjection || localToWorldMatrix != previousCamera || localToWorldMatrix2 != previousSource || source.color != previousTint || source.flipX != lastFlipX || source.flipY != lastFlipY || vector != previousPrimary || reducedDetail != lastReducedDetail || smooth != lastSmooth;
 		for (int j = 0; j < num2; j++)
 		{
 			if (flag2)
@@ -171,27 +171,35 @@ internal sealed class GroupVignette : IDisposable
 			{
 				blendCentres[k] = new LightPoint(centres[k].x * viewWidth, centres[k].y * viewHeight);
 			}
+			if (num2 > 1)
+			{
+				blendGrid.Prepare(blendCentres, num2, viewWidth, viewHeight, 3.5, reducedDetail, smooth);
+			}
+			if (projectedVertices == null || projectedVertices.Length != spriteVertices.Length)
+				projectedVertices = new LightVertex[spriteVertices.Length];
+			LightProjection.Prepare(camera, source.transform, spriteVertices, spriteUV,
+				source.flipX, source.flipY, projectedVertices);
+			if (num2 > 1)
+			{
+				for (int k = 0; k < spriteVertices.Length; k++)
+				{
+					LightVertex screen = projectedVertices[k];
+					projectedRim[k] = new LightPoint(screen.X * viewWidth, screen.Y * viewHeight);
+				}
+				edgeFade.Project(projectedRim,smooth);
+			}
 			for (int l = 0; l < num2; l++)
 			{
 				Vector2 vector5 = centres[l] - vector;
+				lightShift = vector5;
 				for (int m = 0; m < spriteTriangles.Length; m += 3)
 				{
 					for (int n = 0; n < 3; n++)
 					{
 						int num3 = spriteTriangles[m + n];
-						Vector2 vector6 = spriteVertices[num3];
-						if (source.flipX)
-						{
-							vector6.x = 0f - vector6.x;
-						}
-						if (source.flipY)
-						{
-							vector6.y = 0f - vector6.y;
-						}
-						Vector3 vector7 = camera.WorldToViewportPoint(source.transform.TransformPoint(vector6));
-						vector7.x += vector5.x;
-						vector7.y += vector5.y;
-						clipA[n] = new LightVertex(vector7.x, vector7.y, vector7.z, spriteUV[num3].x, spriteUV[num3].y);
+						LightVertex vertex = projectedVertices[num3];
+						clipA[n] = new LightVertex(vertex.X + vector5.x, vertex.Y + vector5.y,
+						vertex.Z, vertex.U, vertex.V);
 					}
 					LightVertex[] a = clipA;
 					LightVertex[] b = clipB;
@@ -226,6 +234,7 @@ internal sealed class GroupVignette : IDisposable
 				}
 			}
 			mesh.Clear();
+			mesh.indexFormat = vertices.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
 			mesh.SetVertices(vertices);
 			mesh.SetUVs(0, uvs);
 			mesh.SetColors(colors);
@@ -239,6 +248,8 @@ internal sealed class GroupVignette : IDisposable
 			oldCount = num2;
 			lastFlipX = source.flipX;
 			lastFlipY = source.flipY;
+			lastReducedDetail = reducedDetail;
+			lastSmooth = smooth;
 			built = true;
 			Array.Copy(centres, oldCentres, num2);
 		}
@@ -259,45 +270,62 @@ internal sealed class GroupVignette : IDisposable
 		renderingCamera = camera;
 		source.enabled = false;
 		renderer.enabled = triangles.Count > 0;
-		Status = "smooth_glows=" + num2 + " triangles=" + triangles.Count / 3;
+		Status = "normalized_glows=" + num2 + " budget=1 shared_grid=" + (num2 > 1 ? blendGrid.Columns + "x" + blendGrid.Rows : "native") + " triangles=" + triangles.Count / 3;
 		return true;
 	}
 
 	private void BlendTriangle(Camera camera, LightVertex a, LightVertex b, LightVertex c, Color tint, int player, int count)
 	{
-		int count2 = vertices.Count;
-		Vector3 vector = camera.ViewportToWorldPoint(new Vector3(a.X, a.Y, a.Z));
-		Vector3 vector2 = camera.ViewportToWorldPoint(new Vector3(b.X, b.Y, b.Z));
-		Vector3 vector3 = camera.ViewportToWorldPoint(new Vector3(c.X, c.Y, c.Z));
-		bool clockwise = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X) < 0f;
-		for (int i = 0; i <= 6; i++)
+		float determinant = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+		if (Mathf.Abs(determinant) < 1e-12f)
 		{
-			for (int j = 0; j <= 6 - i; j++)
-			{
-				float num = (float)j / 6f;
-				float num2 = (float)i / 6f;
-				float num3 = 1f - num - num2;
-				float num4 = a.X * num3 + b.X * num + c.X * num2;
-				float num5 = a.Y * num3 + b.Y * num + c.Y * num2;
-				vertices.Add(vector * num3 + vector2 * num + vector3 * num2);
-				uvs.Add(new Vector2(a.U * num3 + b.U * num + c.U * num2, a.V * num3 + b.V * num + c.V * num2));
-				Color item = tint;
-				item.a *= (float)LightBlendRules.Weight(blendCentres, count, player, num4 * viewWidth, num5 * viewHeight, 3.5, blendScratch);
-				colors.Add(item);
-			}
+			return;
 		}
-		for (int k = 0; k < 6; k++)
+		bool clockwise = determinant < 0f;
+		Vector3 worldA = camera.ViewportToWorldPoint(new Vector3(a.X, a.Y, a.Z));
+		Vector3 worldB = camera.ViewportToWorldPoint(new Vector3(b.X, b.Y, b.Z));
+		Vector3 worldC = camera.ViewportToWorldPoint(new Vector3(c.X, c.Y, c.Z));
+		int first = vertices.Count;
+		if (count == 1)
 		{
-			int num6 = count2 + k * 7 - k * (k - 1) / 2;
-			int num7 = num6 + 6 - k + 1;
-			for (int l = 0; l < 6 - k; l++)
-			{
-				AddTriangle(num6 + l, num6 + l + 1, num7 + l, clockwise);
-				if (l < 6 - k - 1)
-				{
-					AddTriangle(num6 + l + 1, num7 + l + 1, num7 + l, clockwise);
-				}
-			}
+			// A single surviving player keeps the original sprite and full tint.
+			vertices.Add(worldA);
+			vertices.Add(worldB);
+			vertices.Add(worldC);
+			uvs.Add(new Vector2(a.U, a.V));
+			uvs.Add(new Vector2(b.U, b.V));
+			uvs.Add(new Vector2(c.U, c.V));
+			colors.Add(tint);
+			colors.Add(tint);
+			colors.Add(tint);
+			AddTriangle(first, first + 1, first + 2, clockwise);
+			return;
+		}
+
+		blendVertices.Clear();
+		blendGrid.Tessellate(a, b, c, player, blendVertices);
+		for (int i = 0; i < blendVertices.Count; i++)
+		{
+			LightWeightedVertex sample = blendVertices[i];
+			LightVertex v = sample.Vertex;
+			float wb = ((v.X - a.X) * (c.Y - a.Y) - (v.Y - a.Y) * (c.X - a.X)) / determinant;
+			float wc = ((b.X - a.X) * (v.Y - a.Y) - (b.Y - a.Y) * (v.X - a.X)) / determinant;
+			// Reuse the native triangle's world plane instead of making thousands
+			// of per-vertex Unity camera calls when eight players are moving.
+			vertices.Add(worldA + (worldB - worldA) * wb + (worldC - worldA) * wc);
+			uvs.Add(new Vector2(v.U, v.V));
+			Color color = tint;
+			// Keep RGB, atlas, shader and scene grading native. LinearLight uses
+			// RGB as its blend colour; light ownership belongs in alpha instead.
+			// A bounded taper also removes the sprite's hard polygonal outline.
+			// It does not add light, fade the viewport border, or change native RGB.
+			color.a *= (float)(sample.Weight * edgeFade.At(
+				(v.X - lightShift.x) * viewWidth, (v.Y - lightShift.y) * viewHeight));
+			colors.Add(color);
+		}
+		for (int i = 0; i < blendVertices.Count; i += 3)
+		{
+			AddTriangle(first + i, first + i + 1, first + i + 2, clockwise);
 		}
 	}
 
@@ -328,6 +356,8 @@ internal sealed class GroupVignette : IDisposable
 			spriteVertices = sprite.vertices;
 			spriteUV = sprite.uv;
 			spriteTriangles = sprite.triangles;
+			projectedRim = new LightPoint[spriteVertices.Length];
+			edgeFade.Topology(spriteTriangles);
 			built = false;
 		}
 		if (!root)

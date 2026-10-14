@@ -1,0 +1,46 @@
+private static bool HeroFrame(HeroController self, out PlayerSlot p)
+	{
+		CoopSession session = Session;
+		p = HeroPlayer(self);
+		if (session == null || !session.Active || p == null)
+		{
+			return true;
+		}
+		RefreshWalk(p);
+		if (Time.unscaledTime < p.WakeUntil)
+		{
+			Controls.Pump(p, block: true);
+			return false;
+		}
+		if (p == session.Primary && session.EntryProxy)
+		{
+			Controls.Pump(p, block: true);
+			return true;
+		}
+		if (ScriptedParty.Holds(p) || ChallengeSequence.Holds(p))
+		{
+			return false;
+		}
+		if (p.ArenaTransfer)
+		{
+			return false;
+		}
+		if (BenchSeats.Custom(p))
+		{
+			return false;
+		}
+		if (EmergencyWarp.Active(p) || CoopEnding.HoldsActor(p))
+		{
+			return false;
+		}
+		if ((p.Index > 0 && Charms.NativeMenuOpen) || (Plugin.Self.Panel && Charms.Editing && p.Index == Charms.Selected))
+		{
+			return false;
+		}
+		if (!CoopRules.RunHeroFrame(p.Index, p.Ready, p.Down, p.Hazard, p.Retiring, p.InputBlocked, session.Gameplay, p.Reviving))
+		{
+			return false;
+		}
+		Controls.Pump(p, TransitionVote.Holding(p) || Plugin.Self.Panel || p.Down || p.Hazard || !p.Connected || PvpMatch.BlocksInput);
+		return true;
+	}

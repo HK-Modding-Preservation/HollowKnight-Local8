@@ -16,7 +16,7 @@ internal static class PvpFamiliars {
  static readonly Dictionary<int,PvpCombat.Attack> shieldOriginal=new Dictionary<int,PvpCombat.Attack>();
  static readonly Dictionary<int,PvpKind> kinds=new Dictionary<int,PvpKind>();
  internal static bool Duel {get{return Local8Mod.Settings.PvpMode==2&&PvpMatch.Running&&PvpCharms.Allowed;}}
- static bool Hunting {get{var s=PvpCombat.Session;var gm=GameManager.instance;return Duel&&Local8Mod.Settings.PvpCharmAttacks&&PvpMatch.CanFight&&PvpCombat.Enabled&&s!=null&&s.Active&&s.Gameplay&&!s.TeamWipe&&gm&&!gm.isPaused&&!Plugin.Self.Panel;}}
+ static bool Hunting {get{var s=PvpCombat.Session;var gm=GameManager.instance;return Duel&&!PvpSpellOnly.Active&&Local8Mod.Settings.PvpCharmAttacks&&PvpMatch.CanFight&&PvpCombat.Enabled&&s!=null&&s.Active&&s.Gameplay&&!s.TeamWipe&&gm&&!gm.isPaused&&!Plugin.Self.Panel;}}
  static bool Owner(Component component,out PlayerSlot p){string kind;RoleSummons.Resolve(component?component.gameObject:null,out p,out kind);return p!=null&&kind!=null;}
  static bool Combatant(PlayerSlot p){return p!=null&&p.Hero&&p.Alive&&p.Ready&&p.Connected&&!p.InputBlocked&&!p.ArenaTransfer&&!p.Vitals.AtBench&&Time.time>=p.ProtectionUntil&&!p.Hero.cState.transitioning;}
  static bool Visible(Component detector,PlayerSlot owner,PlayerSlot p,Collider2D area){

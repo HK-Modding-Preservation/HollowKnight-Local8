@@ -1,0 +1,101 @@
+private static void RunFsm(Action action, HutongGames.PlayMaker.Fsm self, bool frame)
+	{
+		bool enemy;
+		PlayerSlot playerSlot = FsmPlayer(self, out enemy);
+		if ((frame && playerSlot != null && (ShadeCloakRitual.HoldsFsm(playerSlot, self) || playerSlot.InputBlocked || playerSlot.Down || playerSlot.Hazard || playerSlot.Retiring || !playerSlot.Ready || (playerSlot.Index > 0 && Charms.NativeMenuOpen) || (Plugin.Self.Panel && Charms.Editing && playerSlot.Index == Charms.Selected))) || (frame && playerSlot != null && Session.Resolve(self) == playerSlot && self.Name == "Spell Control" && (playerSlot.Reviving || (!playerSlot.FocusReleased && playerSlot.Actions != null && playerSlot.Actions.cast.IsPressed))))
+		{
+			return;
+		}
+		using (PlayerContext.Enter(playerSlot, enemy))
+		{
+			using (CharmNativeUi.Enter(self))
+			{
+				using (Lifeblood.Enter(self))
+				{
+					Retarget(self, playerSlot);
+					WorldRouting.Call before = WorldRouting.Begin(self);
+					try
+					{
+						action();
+					}
+					finally
+					{
+						WorldRouting.End(self, before);
+					}
+				}
+			}
+		}
+	}
+private static void FsmAwake(On.HutongGames.PlayMaker.Fsm.orig_Awake orig, HutongGames.PlayMaker.Fsm self)
+	{
+		RunFsm(delegate
+		{
+			orig(self);
+		}, self, frame: false);
+	}
+private static void FsmEnable(On.HutongGames.PlayMaker.Fsm.orig_OnEnable orig, HutongGames.PlayMaker.Fsm self)
+	{
+		RunFsm(delegate
+		{
+			orig(self);
+		}, self, frame: false);
+		PvpCombat.TrackFsm(self);
+	}
+private static void FsmStart(On.HutongGames.PlayMaker.Fsm.orig_Start orig, HutongGames.PlayMaker.Fsm self)
+	{
+		InteractionRouter.Ready(self);
+		RunFsm(delegate
+		{
+			orig(self);
+		}, self, frame: false);
+		PvpCombat.TrackFsm(self);
+	}
+private static void FsmEvent(On.HutongGames.PlayMaker.Fsm.orig_ProcessEvent orig, HutongGames.PlayMaker.Fsm self, HutongGames.PlayMaker.FsmEvent evt, HutongGames.PlayMaker.FsmEventData data)
+	{
+		if (PartyDeath.BlockEvent(self, evt, data)) return;
+		if (ElderBaldurRange.BlockFar(self, evt)) return;
+		ShadeCloakRitual.BeforeEvent(self, evt, data);
+		HutongGames.PlayMaker.Fsm self2 = self;
+		HutongGames.PlayMaker.FsmEvent evt2 = evt;
+		HutongGames.PlayMaker.FsmEventData data2 = data;
+		if (ChallengeSequence.Intercept(self2, evt2) || InteractionRouter.Blocks(self2) || (Session != null && Session.Active && !InteractionRouter.EventAllowed(self2, data2)))
+		{
+			return;
+		}
+		if (Session != null && Session.Active)
+		{
+			StagMenuRouting.Observe(self2, evt2, data2);
+		}
+		ShareRoar(self2, evt2);
+		ArenaGather.Observe(self2, evt2, data2);
+		if (Session != null && Session.Active && Lifeblood.Award(evt2))
+		{
+			return;
+		}
+		PlayerSlot current = PlayerContext.Current;
+		CoopSession session = Session;
+		if (session != null && session.Active && current != null && evt2 != null && localEvents.Contains(evt2.Name) && !PartyDeath.IsDeath(evt2))
+		{
+			PlayerSlot playerSlot = session.Resolve(self2);
+			if (playerSlot != null && playerSlot != current)
+			{
+				return;
+			}
+		}
+		if (session != null && session.Active && current != null && current.Index > 0 && evt2 != null && IsVitalsHud(self2) && (localEvents.Contains(evt2.Name) || evt2.Name.StartsWith("MP ") || evt2.Name == "ADD BLUE HEALTH"))
+		{
+			return;
+		}
+		SharedAcquisition.BeforeEvent(self2, evt2, data2);
+		try
+		{
+			RunFsm(delegate
+			{
+				orig(self2, evt2, data2);
+			}, self2, frame: false);
+		}
+		finally
+		{
+			StagMenuRouting.AfterEvent(self2, evt2);
+		}
+	}

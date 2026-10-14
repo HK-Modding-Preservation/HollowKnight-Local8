@@ -726,6 +726,7 @@ internal static class Controls
 			{
 				slot.Actions.ClearInputState();
 			}
+			else PvpSpellOnly.Input(slot);
 		}
 	}
 

@@ -57,3 +57,27 @@ Nearby crystal-dash launches receive cooperative damage factors of 3.5×, 4.75×
 Players use native challenge draw/sheath motions with individual draw sounds. Additional players participate in cooperative ending absorption and dark-ability rituals, with controlled dream/dark essence and cleanup across scene fades. The intact Delicate Flower has a subtle owner-specific soul aura.
 
 The configuration interface and role descriptions provide **Spanish, English, French, German, Italian, Portuguese, Russian, Chinese, Japanese and Korean** text, with English fallback. The panel key, player setup, camera, difficulty, PvP, rescue, recovery, lighting and performance options are configurable.
+
+## Profiles and adventure statistics (v0.11.0)
+
+Named profiles retain a stable identity, role, charm preferences, appearance, extra-player keyboard bindings and adventure totals across slots/sessions. Duplicate active identities are rejected. Equipment changes respect actual ownership/notches and a rested bench or the initial join window, with rollback on failed provider changes and no free health/SOUL/story unlocks.
+
+Adventure statistics record actual enemy HP damage, kills, recent assists, health recovered, healer output, successful revives, deaths and active time. PvP statistics remain separate.
+
+## Spells-only duels (v0.11.0)
+
+Optional spell-only rules suppress nail attacks, Nail Arts, Dream Nail, crystal dash and offensive charm/familiar/shield damage during round combat. Movement, dash, healing and spells remain available. Each living participant regenerates SOUL independently at 1–99 points/second (default 11), respecting individual capacity, pause/loading/countdown/results and death. Rules are fixed for the match and released on exit.
+
+## Performance profiles (v0.11.0)
+
+| Joined players | Automatic profile | Native particles/blur | Decoration and bloom |
+| --- | --- | --- | --- |
+| 1–2 | Normal | Previous user preferences | Original preferences |
+| 3–4 | Balanced | Low | Reduced cost |
+| 5–8 | Maximum | Low | Minimum decorative detail, bloom off |
+
+Manual presets and individual controls remain available. An individual change selects Custom, preserving the user's choice. Restore recovers prior native graphics and reduced-effect preferences. Low quality is applied once to new player copies; profiles preserve necessary combat signals while reducing optional effects. The mod also reduces repeated player-context, reflection, hierarchy and PlayMaker-recipient work. No specific FPS is promised.
+
+## Expanded charm controls (v0.11.0)
+
+Each player's equipped card has its own cursor and supports removal through the ordinary equipment rules. Native and supported custom catalogs use real IDs and provider descriptions. Long descriptions adapt to space, favor utility over lore and retain full hover text. Acquired Void Heart cannot be removed. Charms/roles remain usable at benches, with ownership checks separating the inventory from real shop and NPC dialogue.

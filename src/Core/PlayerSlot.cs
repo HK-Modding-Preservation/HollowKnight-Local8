@@ -9,6 +9,10 @@ internal sealed class PlayerSlot
 {
 	internal int Index;
 
+	internal string ProfileId;
+	internal PlayerAdventureStatistics Adventure;
+	internal bool ProfileLoadedThisJoin;
+
 	internal HeroController Hero;
 
 	internal HeroActions Actions;
@@ -54,6 +58,8 @@ internal sealed class PlayerSlot
 	internal int LastInputFrame = -1;
 
 	internal float DownAt;
+
+	internal float NextTimedRespawnAttempt;
 
 	internal float HazardUntil;
 

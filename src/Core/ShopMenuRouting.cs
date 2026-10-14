@@ -166,7 +166,7 @@ internal static class ShopMenuRouting
 	{
 		UIManager instance = UIManager.instance;
 		GameManager instance2 = GameManager.instance;
-		if (f == null || p == null || p.Actions == null || !p.Alive || !p.Ready || StagMenuRouting.HasOwner || ((bool)instance2 && instance2.isPaused) || ((bool)instance && instance.uiState == UIState.PAUSED))
+		if (f == null || !IsShopList(f) || p == null || p.Actions == null || !p.Alive || !p.Ready || StagMenuRouting.HasOwner || ((bool)instance2 && instance2.isPaused) || ((bool)instance && instance.uiState == UIState.PAUSED))
 		{
 			return;
 		}
@@ -190,6 +190,17 @@ internal static class ShopMenuRouting
 		}
 		lastInput = Time.unscaledTime;
 		Bind();
+	}
+
+	internal static bool IsShopList(Fsm f)
+	{
+		if (f == null || !f.GameObject || !InteractionRouter.ScreenList(f)) return false;
+		if (f.GameObject.GetComponentInParent<ShopMenuStock>() != null) return true;
+		// ui_list_getinput is also used by inventory and other menus. A bench
+		// interaction owner alone is not evidence that a shop has opened.
+		for (Transform parent = f.GameObject.transform; parent != null; parent = parent.parent)
+			if (parent.name.IndexOf("shop", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+		return f == confirmation || (list != null && list.GameObject && list.GameObject.activeInHierarchy && f.Name == "ui_list" && Time.unscaledTime - lastInput < 4f);
 	}
 
 	internal static void Tick()

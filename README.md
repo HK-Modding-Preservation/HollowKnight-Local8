@@ -1,47 +1,55 @@
 # Hollow Knight 8-Player Co-op
 
-**Public version: v0.10.0 · DLL version: 0.10.0 · ModLinks version: 0.10.0.0**
+**Public version: v0.11.0 · DLL version: 0.11.0 · ModLinks version: 0.11.0.0**
 
-Local cooperative multiplayer for **2–8 players** inside one Hollow Knight game. Players share the world, enemies, bosses and story progression while keeping their own controls, health, SOUL, charms, optional roles and supported Custom Knight skins.
+Local cooperative multiplayer for **2–8 players** inside one Hollow Knight game. Players share the world, enemies, bosses and story progression while keeping their own controls, health, SOUL, charms, optional roles, profiles and supported Custom Knight skins.
 
-Target: **Hollow Knight 1.5.78.11833** with its matching **Hollow Knight Modding API**. This is local multiplayer, not a separate network-client system.
+Target: **Hollow Knight 1.5.78.11833** with its matching **Hollow Knight Modding API**.
 
-## What is new
+## What is new in v0.11.0
 
-- Nine saved role choices, including no role, with independent selection and role changes from the charm menu.
-- Configurable PvP trips to boss-free vanilla Godhome arenas, restoring adventure resources and positions when the match ends.
-- More reliable input ownership, numeric-keypad controls, spell direction, controller vibration and menu recovery.
-- Improvements to swimming, rescue, room transitions, safe spawning, Godhome framing and boss music.
-- Cooperative crystal-dash bonuses, native bench/challenge motions and shared ending/dark-ability effects.
+- Named player profiles and per-player adventure statistics, portable between slots and sessions.
+- Spells-only PvP with configurable SOUL regeneration and safer duel entry from jumps, falls and benches.
+- Redesigned F8 menus, translated hover help and expanded native/custom charm navigation, icons and descriptions.
+- Automatic performance presets: **1–2 Normal, 3–4 Balanced, 5–8 Maximum**, with manual customization and Restore.
+- Direct vanilla particle/blur controls, optional reduced hit effects and less repeated context/event/hierarchy work.
+- World-interaction fixes for mushrooms, metal recoil, shade gates, slopes, conveyors, crystal dash and enemy sensors/targeting.
+- Improved party death, healing/background rendering, boss-roar motion and interaction/menu control recovery.
 
-See the [v0.10.0 release notes](docs/RELEASE_NOTES_v0.10.0.md), [changelog](CHANGELOG.md) and [features](docs/FEATURES.md).
+See the [v0.11.0 release notes](docs/RELEASE_NOTES_v0.11.0.md), [changelog](CHANGELOG.md) and [features](docs/FEATURES.md).
 
 ## Installation
 
-Install the matching Modding API, then extract **HollowKnightLocal8-v0.10.0.zip** into a `HollowKnightLocal8` folder under the game's `Mods` directory. Replace the existing DLL; do not keep multiple versions installed.
+Install the matching Modding API, then extract **HollowKnightLocal8-v0.11.0.zip** into the existing mod folder under the game's `Mods` directory. Replace the old DLL; do not keep multiple versions installed. Existing settings and saves are retained.
 
-The release ZIP contains only **HollowKnightLocal8.dll**. All mod-owned artwork and translations are embedded in that DLL. [Download v0.10.0](https://github.com/RaulSB-code/HollowKnight-Local8/releases/download/v0.10.0/HollowKnightLocal8-v0.10.0.zip).
+The installation ZIP contains only **HollowKnightLocal8.dll**. All mod-owned artwork and translations are embedded. [Download v0.11.0](https://github.com/RaulSB-code/HollowKnight-Local8/releases/download/v0.11.0/HollowKnightLocal8-v0.11.0.zip).
 
-Search for **Hollow Knight 8-Player Co-op** in Lumafly once its ModLinks entry has been accepted and updated. Manual installation remains available. See [installation](docs/INSTALLATION.md).
+For Lumafly, search **Hollow Knight 8-Player Co-op**. The catalog follows ModLinks; a newly published GitHub version appears there after its update request is merged. See [installation](docs/INSTALLATION.md).
 
 ## Playing
 
-Load a save, press Start on another controller to join, or use **F8** to configure extra players and keyboard profiles. The panel key is configurable. The first role selection is saved per player slot; later role changes use the charm menu near a bench.
+Load a save and press Start on another controller to join, or use **F8** to configure players and keyboard profiles. The panel key is configurable. Nine role choices, including no role, are available; later role/equipment changes respect bench rules.
 
-**RB** is assigned to the mod's dream rescue instead of quick cast during co-op. The default keyboard rescue key is **1**, and bindings can be changed. Hold the rescue input to move as dream essence and rejoin another living player. Cooldown and safe-landing checks prevent repeated unsafe rescues.
+**RB** is assigned to dream rescue instead of quick cast during co-op. The default keyboard rescue key is **1**, and bindings can be changed. Hold it to move as dream essence and rejoin another living player, subject to cooldown and safe landing.
 
-Up to four keyboard profiles are supported. Some physical keyboards cannot report all simultaneous key combinations; the mod includes a setup warning and rebinding options. Normal controllers and supported vJoy/DirectInput devices are also available.
+Up to four keyboard profiles are supported. Physical keyboard rollover limits can affect simultaneous keys; the mod provides a warning and rebinding options. Supported vJoy/DirectInput devices are also available.
 
-## Compatibility
+## Profiles, charms and performance
 
-**Custom Knight** is recommended and has dedicated integration for individual player skins. **Enemy HP Bar** is recommended for shared fights. Neither is a required dependency. Large content mods compatibility and unusual scripted scenes still need testing. See [compatibility](docs/COMPATIBILITY.md).
+In **F8 → Players**, select the target player to create, save or load a named profile. Profiles retain identity, role, charm preferences, appearance, extra keyboard bindings and adventure totals. Loading equipment respects ownership, notches and the bench/initial-join window; it does not grant resources or story progress. One profile cannot be active in two slots.
 
-## Source and development
+Open the charm inventory near a bench to navigate each player's own catalog and equipped card. Moving up beyond the catalog's top row enters that player's equipped card; submit removes the selected equipped charm where permitted. Supported custom charms use their real IDs, icons and provider descriptions. Acquired Void Heart remains permanent.
 
-This package contains the complete source used to compile the v0.10.0 DLL, including the latest Work development changes through alpha186. It builds directly from C# and embedded assets; no previous mod DLL is used as a build input. Game libraries are not redistributed.
+In **F8 → Game → Performance**, use Automatic or select a preset. The recommendation follows joined player count. Changing an individual option selects Custom, preserving the manual choice. Vanilla particles, blur, bloom, decoration and damage effects can be adjusted separately; Restore recovers the previous graphics settings. These profiles reduce visual/CPU costs but do not guarantee a particular frame rate.
 
-[Build instructions](docs/BUILDING.md) · [source notes](docs/SOURCE_NOTES.md) · [publishing instructions](docs/PUBLISHING.md)
+## Compatibility and testing
 
-The mod is under active development. Automated checks and deterministic rebuild verification supplement gameplay testing; they do not cover every native scene, controller or mod combination. [Report bugs](https://github.com/RaulSB-code/HollowKnight-Local8/issues) with the version, game version, player count, other mods, scene, reproduction steps and relevant log.
+**Custom Knight** has dedicated integration for individual skins. **Enemy HP Bar** is useful for shared fights. Neither is required. Custom-charm providers and **Pale Court** have additional handling, but larger content mods and unusual scripted scenes remain experimental. See [compatibility](docs/COMPATIBILITY.md).
 
-Developed by **RaulSB-code**. Hollow Knight belongs to Team Cherry. Hollow Knight 8-Player Co-op is an unofficial community mod and is not affiliated with Team Cherry.
+This release uses alpha227 gameplay and includes controlled tests of profiles, menus, contexts, charms, PvP, world ownership and lifecycle cleanup. The DLL is rebuilt from the complete source. Recent interaction/control fixes still need wider native gameplay coverage; eight simulated slots are not a test with eight physical controllers.
+
+[Build instructions](docs/BUILDING.md) · [source notes](docs/SOURCE_NOTES.md) · [release verification](docs/VALIDATION_v0.11.0.md)
+
+[Report bugs](https://github.com/RaulSB-code/HollowKnight-Local8/issues) with the version, game version, player count, other mods, scene, reproduction steps and relevant log.
+
+Developed by **RaulSB-code**. Hollow Knight belongs to Team Cherry. This is an unofficial community mod and is not affiliated with Team Cherry. AI-assisted development is disclosed in the existing ModLinks tag and release notes.

@@ -10,8 +10,8 @@ internal static class CrystalParticleDensity {
  internal static void Apply(ParticleSystem ps){
   if(!ps)return;Original original;
   if(!originals.TryGetValue(ps,out original)){var m=ps.main;var e=ps.emission;original=new Original{Max=m.maxParticles,Time=e.rateOverTimeMultiplier,Distance=e.rateOverDistanceMultiplier};originals[ps]=original;}
-  var main=ps.main;main.maxParticles=Math.Max(1,Math.Min(32,(int)Math.Ceiling(original.Max*.65f)));
-  var emission=ps.emission;emission.rateOverTimeMultiplier=original.Time*.65f;emission.rateOverDistanceMultiplier=original.Distance*.65f;
+  var main=ps.main;main.maxParticles=Math.Max(1,Math.Min(16,(int)Math.Ceiling(original.Max*.4f)));
+  var emission=ps.emission;emission.rateOverTimeMultiplier=original.Time*.4f;emission.rateOverDistanceMultiplier=original.Distance*.4f;
  }
  internal static void Restore(ParticleSystem ps){Original original;if(!ps||!originals.TryGetValue(ps,out original))return;
   var main=ps.main;main.maxParticles=original.Max;var e=ps.emission;e.rateOverTimeMultiplier=original.Time;e.rateOverDistanceMultiplier=original.Distance;originals.Remove(ps);

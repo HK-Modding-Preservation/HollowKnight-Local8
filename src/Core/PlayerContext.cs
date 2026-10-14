@@ -14,13 +14,13 @@ internal sealed class PlayerContext : IDisposable
 	[ThreadStatic]
 	internal static bool TargetingEnemy;
 
-	private static readonly FieldInfo HeroInstance = Reflect.Field(typeof(HeroController), "_instance");
+	private static readonly ReferenceField HeroInstance = ReferenceField.For(Reflect.Field(typeof(HeroController), "_instance"));
 
-	private static readonly FieldInfo ManagerHero = Reflect.Field(typeof(GameManager), "<hero_ctrl>k__BackingField");
+	private static readonly ReferenceField ManagerHero = ReferenceField.For(Reflect.Field(typeof(GameManager), "<hero_ctrl>k__BackingField"));
 
-	private static readonly FieldInfo InputHero = Reflect.Field(typeof(InputHandler), "heroCtrl");
+	private static readonly ReferenceField InputHero = ReferenceField.For(Reflect.Field(typeof(InputHandler), "heroCtrl"));
 
-	private static readonly FieldInfo InputState = Reflect.Field(typeof(InputHandler), "cState");
+	private static readonly ReferenceField InputState = ReferenceField.For(Reflect.Field(typeof(InputHandler), "cState"));
 
 	private static readonly Stack<PlayerContext> pool = new Stack<PlayerContext>();
 

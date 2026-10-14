@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using GlobalEnums;
+using HutongGames.PlayMaker;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -20,7 +21,13 @@ internal static class ScriptedParty
 
 		internal Vector3 Offset;
 
-		internal GameObject Effect;
+		internal Rigidbody2D Body;
+
+		internal bool Simulated;
+
+		internal Action<tk2dSpriteAnimator, tk2dSpriteAnimationClip> Completed;
+
+		internal Action<tk2dSpriteAnimator, tk2dSpriteAnimationClip, int> Triggered;
 	}
 
 	private static readonly List<Guest> guests = new List<Guest>();
@@ -41,10 +48,19 @@ internal static class ScriptedParty
 
 	private static bool active;
 
-	internal static bool Active => ShadeCloakRitual.Combined(active);
+	private static GameObject card;
+
+	private static bool cardSeen;
+
+	private static PlayerSlot nativeActor;
+
+	internal static bool Active => ShadeCloakRitual.Combined(active || SoulAcquisitionRitual.Active);
+
+	internal static bool TracksChamber => !active && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "Crossroads_ShamanTemple";
 
 	internal static bool Holds(PlayerSlot p)
 	{
+		if (SoulAcquisitionRitual.Holds(p)) return true;
 		if (!active || p == null)
 		{
 			return ShadeCloakRitual.Holds(native: false, p);
@@ -66,7 +82,7 @@ internal static class ScriptedParty
 
 	private static bool FirstSpell(CoopSession s)
 	{
-		if (s != null && s.Active && s.Players.Count > 1 && s.Primary != null && s.Primary.Alive && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "Crossroads_ShamanTemple")
+		if (s != null && s.Active && s.Players.Count > 1 && s.Primary != null && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "Crossroads_ShamanTemple")
 		{
 			return s.Data != null;
 		}
@@ -75,9 +91,9 @@ internal static class ScriptedParty
 
 	internal static void NativeMove(CoopSession s, PlayerSlot p, Vector3 from, Vector3 to)
 	{
-		if (p == s.Primary && FirstSpell(s) && s.Data.fireballLevel == 0 && s.InRoom(from) && s.InRoom(to) && !(Vector2.Distance(from, to) < 12f))
+		if (FirstSpell(s) && p != null && p.Alive && p == Anchor(s) && p.Hero.controlReqlinquished && s.Data.fireballLevel <= 1 && s.InRoom(from) && s.InRoom(to) && !(Vector2.Distance(from, to) < 12f))
 		{
-			Begin(s, "native chamber arrival");
+			Begin(s, "native chamber arrival", p);
 		}
 	}
 
@@ -88,56 +104,56 @@ internal static class ScriptedParty
 		{
 			return;
 		}
-		if (!active && coopSession.Data.fireballLevel == 0)
-		{
-			Begin(coopSession, "native spell orb");
-		}
-		if (!active || !orb.ptZoom)
-		{
-			return;
-		}
-		foreach (Guest guest in guests)
-		{
-			if ((bool)guest.Effect || !guest.Hero)
-			{
-				continue;
-			}
-			try
-			{
-				GameObject gameObject = UnityEngine.Object.Instantiate(orb.ptZoom.gameObject, guest.Hero.transform);
-				gameObject.name = "Local8 Spell Get P" + (guest.Player.Index + 1);
-				gameObject.transform.localPosition = new Vector3(0f, 1.1f, 0f);
-				gameObject.SetActive(value: true);
-				ParticleSystem component = gameObject.GetComponent<ParticleSystem>();
-				if ((bool)component)
-				{
-					component.Play(withChildren: true);
-				}
-				guest.Effect = gameObject;
-			}
-			catch (Exception ex)
-			{
-				Diagnostics.Throttled("SCRIPT spell particles", ex);
-			}
-		}
+		// Orbs/ascent are absorption, not a chamber transfer. Followers stay
+		// in place for the bounded white ritual. NativeMove alone gathers the
+		// party when vanilla really moves its collector into the locked room.
+	}
+
+	internal static void Card(Fsm source, GameObject created)
+	{
+		if (!active || !created) return;
+		card = created;
+		cardSeen = true;
+	}
+
+	private static PlayerSlot Anchor(CoopSession s)
+	{
+		if (active && nativeActor != null && nativeActor.Hero) return nativeActor;
+		PlayerSlot candidate = SharedAcquisition.ResolveCollector("fireballLevel");
+		if (candidate != null && candidate.Alive && candidate.Ready) return candidate;
+		if (s != null && s.Primary != null && s.Primary.Alive) return s.Primary;
+		if (s != null) foreach (PlayerSlot p in s.Players) if (p.Alive && p.Ready) return p;
+		return null;
 	}
 
 	private static void Begin(CoopSession s, string reason)
+	{
+		Begin(s, reason, null);
+	}
+
+	private static void Begin(CoopSession s, string reason, PlayerSlot collector)
 	{
 		if (active || attempted || !FirstSpell(s))
 		{
 			return;
 		}
+		collector = collector ?? Anchor(s);
+		if (collector == null || !collector.Alive || !collector.Ready) return;
+		SoulAcquisitionRitual.Release();
+		SharedAcquisition.ReleasePoses();
+		nativeActor = collector;
 		attempted = true;
 		active = true;
 		scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
 		started = Time.unscaledTime;
 		unlocked = ((s.Data.fireballLevel > 0) ? started : (-1f));
 		playableAt = -1f;
-		lastPrimary = s.Primary.Hero.transform.position;
+		card = null;
+		cardSeen = false;
+		lastPrimary = collector.Hero.transform.position;
 		foreach (PlayerSlot player in s.Players)
 		{
-			if (player.Index <= 0 || !player.Alive || !player.Ready || !player.Hero)
+			if (player == collector || !player.Alive || !player.Ready || !player.Hero)
 			{
 				continue;
 			}
@@ -146,9 +162,18 @@ internal static class ScriptedParty
 				Player = player,
 				Hero = player.Hero,
 				Animator = player.Hero.GetComponent<tk2dSpriteAnimator>(),
-				Offset = new Vector3((float)((player.Index % 2 == 0) ? 1 : (-1)) * (0.75f + 0.35f * (float)((player.Index - 1) / 2)), 0f, (float)CoopRules.PlayerDepth(player.Index) - (float)CoopRules.PlayerDepth(0))
+				Offset = new Vector3((guests.Count % 2 == 0 ? -1 : 1) * (1.4f + .4f * (guests.Count / 2)), 0f, (float)CoopRules.PlayerDepth(player.Index) - (float)CoopRules.PlayerDepth(collector.Index)),
+				Body = player.Hero.GetComponent<Rigidbody2D>()
 			};
 			guests.Add(guest);
+			if (guest.Body) guest.Simulated = guest.Body.simulated;
+			if (guest.Animator)
+			{
+				guest.Completed = guest.Animator.AnimationCompleted;
+				guest.Triggered = guest.Animator.AnimationEventTriggered;
+				guest.Animator.AnimationCompleted = null;
+				guest.Animator.AnimationEventTriggered = null;
+			}
 			using (PlayerContext.Enter(player))
 			{
 				Revival.End(player);
@@ -162,7 +187,7 @@ internal static class ScriptedParty
 					component.simulated = false;
 				}
 			}
-			Vector3 vector = s.Primary.Hero.transform.position + guest.Offset;
+			Vector3 vector = collector.Hero.transform.position + guest.Offset;
 			if (s.InRoom(vector))
 			{
 				Vector3 position = player.Hero.transform.position;
@@ -181,14 +206,15 @@ internal static class ScriptedParty
 		}
 		else
 		{
-			Diagnostics.Write("SCRIPT first spell started " + reason + " guests=" + guests.Count);
+			Diagnostics.Write("SCRIPT first spell started " + reason + " collector=P" + (collector.Index + 1) + " guests=" + guests.Count);
 		}
 	}
 
 	internal static void Tick(CoopSession s)
 	{
 		ShadeCloakRitual.Tick(s);
-		if (s == null || !s.Active || s.Primary == null || !s.Primary.Hero || UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "Crossroads_ShamanTemple")
+		PlayerSlot collector = s == null ? null : Anchor(s);
+		if (s == null || !s.Active || collector == null || !collector.Hero || UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "Crossroads_ShamanTemple")
 		{
 			if (active)
 			{
@@ -201,14 +227,6 @@ internal static class ScriptedParty
 			{
 				return;
 			}
-			if (!active && s.Data.fireballLevel == 0)
-			{
-				Vector3 position = s.Primary.Hero.transform.position;
-				if (s.Primary.Hero.controlReqlinquished && position.x > 17f && position.x < 23f && position.y > 9.4f && position.y < 15f)
-				{
-					Begin(s, "native spell ascent");
-				}
-			}
 			int fireballLevel = s.Data.fireballLevel;
 			if (observedFireball < 0)
 			{
@@ -216,20 +234,18 @@ internal static class ScriptedParty
 			}
 			if (!active)
 			{
-				if (fireballLevel > observedFireball && s.Primary.Hero.controlReqlinquished)
-				{
-					Begin(s, "shared spell unlock");
-				}
+				// A level increase is not proof of a teleport. Do not gather
+				// followers just because P1 gained the shared ability flag.
 				observedFireball = fireballLevel;
 				return;
 			}
 			observedFireball = fireballLevel;
-			if (s.Primary.Down)
+			if (!collector.Alive)
 			{
 				End(restore: true);
 				return;
 			}
-			HeroController hero = s.Primary.Hero;
+			HeroController hero = collector.Hero;
 			if (unlocked < 0f && s.Data.fireballLevel > 0)
 			{
 				unlocked = Time.unscaledTime;
@@ -258,13 +274,19 @@ internal static class ScriptedParty
 					if (text2 != null && text2 != guest.Clip && (bool)guest.Animator && guest.Animator.GetClipByName(text2) != null)
 					{
 						guest.Clip = text2;
-						guest.Animator.Play(text2);
+						try
+						{
+							SharedAcquisition.Replaying = true;
+							guest.Animator.Play(text2);
+						}
+						finally { SharedAcquisition.Replaying = false; }
 					}
 				}
 			}
 			UIManager instance = UIManager.instance;
-			bool flag2 = s.Gameplay && (bool)instance && instance.uiState == UIState.PLAYING && !Plugin.Self.Panel;
-			if (!flag2 && s.Gameplay && unlocked >= 0f && Time.unscaledTime - unlocked > 18f && s.Primary.Actions != null && !Plugin.Self.Panel && (Mathf.Abs(s.Primary.Actions.moveVector.X) > 0.25f || Mathf.Abs(s.Primary.Actions.moveVector.Y) > 0.25f))
+			bool visibleCard = card && card.activeInHierarchy;
+			bool flag2 = s.Gameplay && (bool)instance && instance.uiState == UIState.PLAYING && !Plugin.Self.Panel && !visibleCard;
+			if (!flag2 && s.Gameplay && unlocked >= 0f && Time.unscaledTime - unlocked > 18f && cardSeen && !visibleCard && !Plugin.Self.Panel)
 			{
 				flag2 = true;
 				Diagnostics.Write("SCRIPT first spell recovering stuck UI state=" + (instance ? instance.uiState.ToString() : "missing"));
@@ -299,16 +321,16 @@ internal static class ScriptedParty
 				HeroAnimationController component4 = hero.GetComponent<HeroAnimationController>();
 				if (!num || hero.controlReqlinquished || !hero.acceptingInput || ((bool)component4 && !component4.controlEnabled))
 				{
-					if (!(hero == s.Primary.Hero) || s.Primary.Actions == null || (!(Mathf.Abs(s.Primary.Actions.moveVector.X) > 0.25f) && !(Mathf.Abs(s.Primary.Actions.moveVector.Y) > 0.25f)) || Time.unscaledTime - playableAt < 3f || (InteractionRouter.ActivePlayer != null && Time.unscaledTime - playableAt < 12f))
+					if (!(hero == collector.Hero) || visibleCard || Time.unscaledTime - playableAt < 3f || (InteractionRouter.ActivePlayer != null && Time.unscaledTime - playableAt < 12f))
 					{
 						return;
 					}
-					using (PlayerContext.Enter(s.Primary))
+					using (PlayerContext.Enter(collector))
 					{
-						ActorRecovery.Reset(s.Primary);
-						CoopSession.RestoreLivingVisuals(s.Primary);
+						ActorRecovery.Reset(collector);
+						CoopSession.RestoreLivingVisuals(collector);
 					}
-					Diagnostics.Write("SCRIPT first spell recovered native P1 after missing wake");
+					Diagnostics.Write("SCRIPT first spell recovered native P" + (collector.Index + 1) + " after missing wake");
 				}
 				End(restore: true);
 			}
@@ -324,14 +346,16 @@ internal static class ScriptedParty
 		CoopSession coopSession = ((Plugin.Self == null) ? null : Plugin.Self.Session);
 		foreach (Guest guest in guests)
 		{
-			if ((bool)guest.Effect)
+			if (guest.Animator)
 			{
-				UnityEngine.Object.Destroy(guest.Effect);
+				if (guest.Animator.AnimationCompleted == null) guest.Animator.AnimationCompleted = guest.Completed;
+				if (guest.Animator.AnimationEventTriggered == null) guest.Animator.AnimationEventTriggered = guest.Triggered;
 			}
+			if (guest.Body) guest.Body.simulated = guest.Simulated;
 			PlayerSlot player = guest.Player;
 			if (restore && (bool)guest.Hero && !(player.Hero != guest.Hero) && !player.Down && !player.Hazard)
 			{
-				Vector3 vector = ((coopSession != null && coopSession.Primary != null && (bool)coopSession.Primary.Hero) ? coopSession.Primary.Hero.transform.position : guest.Hero.transform.position);
+				Vector3 vector = nativeActor != null && nativeActor.Hero ? nativeActor.Hero.transform.position : guest.Hero.transform.position;
 				if (coopSession != null && coopSession.FindSafePosition(vector + guest.Offset, player, out var result))
 				{
 					guest.Hero.transform.position = result;
@@ -354,6 +378,23 @@ internal static class ScriptedParty
 		scene = null;
 		started = 0f;
 		unlocked = (playableAt = -1f);
+		card = null;
+		cardSeen = false;
+		nativeActor = null;
+	}
+
+	internal static void SafetyTick(CoopSession s)
+	{
+		if (!active) return;
+		bool local = s != null && s.Active && nativeActor != null && nativeActor.Hero && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == scene;
+		if (!local) End(restore: false);
+		else if (Time.unscaledTime - started >= 45f)
+		{
+			// Only release our guest choreography. The native collector/card
+			// continues untouched, even if a callback or session Tick was missed.
+			Diagnostics.Write("SCRIPT first spell guest safety release");
+			End(restore: true);
+		}
 	}
 
 	internal static void Reset()

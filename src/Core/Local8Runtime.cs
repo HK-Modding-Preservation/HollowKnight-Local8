@@ -31,6 +31,14 @@ public sealed class Local8Runtime : MonoBehaviour
 
 	internal Setting<bool> GroupDarkness;
 
+	internal Setting<bool> PerformanceMode;
+
+	internal PerformanceConfiguration Performance;
+
+	internal Setting<bool> PlayerLights;
+
+	internal Setting<bool> SmoothPlayerLights;
+
 	internal Setting<bool> SpawnShades;
 
 	internal Setting<bool> WaitForParty;
@@ -80,6 +88,7 @@ public sealed class Local8Runtime : MonoBehaviour
 			Application.logMessageReceived += OnUnityLog;
 			ModHooks.LanguageGetHook += Charms.SanitizeLocalized;
 			Hooks.Install();
+			PerformancePresets.Install(this);
 			Session = new CoopSession(this);
 			UnityEngine.SceneManagement.SceneManager.activeSceneChanged += OnScene;
 			StartCoroutine(PvpCombat.Loop());
@@ -96,6 +105,8 @@ public sealed class Local8Runtime : MonoBehaviour
 		PvpRoundClock.Migrate();
 		RoleSystem.Install();
 		PvpCharms.Install();
+		PlayerProfiles.Normalize();
+		AdventureStats.Install();
 	}
 
 	private void ImportSettings()
@@ -111,6 +122,10 @@ public sealed class Local8Runtime : MonoBehaviour
 		HideOriginalHud = new Setting<bool>(settings.HideOriginalHUD);
 		BasicHud = new Setting<bool>(settings.BasicHUD);
 		GroupDarkness = new Setting<bool>(settings.GroupDarkness);
+		PerformanceMode = new Setting<bool>(settings.PerformanceMode);
+		Performance = settings.Performance;
+		PlayerLights = new Setting<bool>(settings.PlayerLights);
+		SmoothPlayerLights = new Setting<bool>(settings.SmoothPlayerLights);
 		SpawnShades = new Setting<bool>(settings.SpawnShades);
 		WaitForParty = new Setting<bool>(settings.WaitForParty);
 		SideMargin = new Setting<float>(settings.SideMargin);
@@ -138,6 +153,10 @@ public sealed class Local8Runtime : MonoBehaviour
 		settings.ShowLabels = ShowLabels.Value;
 		settings.BasicHUD = BasicHud.Value;
 		settings.GroupDarkness = GroupDarkness.Value;
+		settings.PerformanceMode = PerformanceMode.Value;
+		settings.Performance = Performance;
+		settings.PlayerLights = PlayerLights.Value;
+		settings.SmoothPlayerLights = SmoothPlayerLights.Value;
 		settings.SpawnShades = SpawnShades.Value;
 		settings.WaitForParty = WaitForParty.Value;
 		settings.SideMargin = SideMargin.Value;
@@ -173,8 +192,10 @@ public sealed class Local8Runtime : MonoBehaviour
 
 	private void Update()
 	{
+		PerformancePresets.Tick(this);
 		CoopShades.Tick();
-		if (MenuInput.Poll())
+		if (MenuInput.CloseOnEscape(Panel)) SetPanel(false);
+		else if (MenuInput.Poll())
 		{
 			SetPanel(!Panel);
 		}
@@ -204,6 +225,7 @@ public sealed class Local8Runtime : MonoBehaviour
 		BenchPoseRecovery.Tick();
 		CrystalDashCoop.Tick();
 		PvpArena.Update(this);
+		PvpSpellOnly.Tick(this);
 		BossMusicGuard.Tick();
 		RoleSystem.Tick(this);
 		ArenaVisualRecovery.Tick();
@@ -212,10 +234,17 @@ public sealed class Local8Runtime : MonoBehaviour
 		MenuInputRecovery.Tick();
 		PvpGeoHud.Tick();
 		FlowerAura.Tick();
+		// Runs even when the session is waiting on native UI/cutscenes. Cosmetic
+		// poses always reach their deadline and never depend on player input.
+		SharedAcquisition.Tick(Session);
+		SoulAcquisitionRitual.Tick(Session);
+		ScriptedParty.SafetyTick(Session);
+		PlayerProfiles.Tick(this);
 	}
 
 	private void LateUpdate()
 	{
+		if (RoarMotionRecovery.Active) RoarMotionRecovery.LateTick(Session);
 		if (Panel)
 		{
 			ForceCursor();
@@ -260,6 +289,9 @@ public sealed class Local8Runtime : MonoBehaviour
 
 	private void OnDestroy()
 	{
+		PerformancePresets.Shutdown(this);
+		PlayerProfiles.Flush(Session);
+		AdventureStats.Uninstall();
 		RoleSystem.Shutdown();
 		RestoreCursor();
 		UnityEngine.SceneManagement.SceneManager.activeSceneChanged -= OnScene;
@@ -320,6 +352,7 @@ public sealed class Local8Runtime : MonoBehaviour
 				Charms.Close();
 				RestoreCursor();
 				ExportSettings();
+				PlayerProfiles.Flush(Session);
 			}
 		}
 	}
@@ -360,7 +393,7 @@ public sealed class Local8Runtime : MonoBehaviour
 	{
 		if (type == LogType.Exception || type == LogType.Error)
 		{
-			Diagnostics.Write("UNITY " + type.ToString() + " " + condition + "\n" + stack);
+			Diagnostics.UnityLog("UNITY " + type.ToString() + " " + condition + "\n" + stack);
 		}
 	}
 }

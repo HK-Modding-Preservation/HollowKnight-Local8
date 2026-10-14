@@ -15,6 +15,7 @@ internal static class Charms
 	internal static int Cursor = 1;
 
 	private static float openedAt;
+	private static readonly int[] editorCursors = new int[8];
 
 	internal static readonly int[] NativeCursor = new int[8];
 
@@ -35,6 +36,8 @@ internal static class Charms
 	private static int nativeFrame = -1;
 
 	private static bool nativeVisible;
+
+	private static float nextBoardProbe;
 
 	internal static bool wasNative;
 
@@ -87,36 +90,46 @@ internal static class Charms
 		}
 		nativeFrame = Time.frameCount;
 		nativeVisible = false;
+		NativeProbeReason = "unavailable";
 		CoopSession coopSession = ((Plugin.Self == null) ? null : Plugin.Self.Session);
 		GameManager instance = GameManager.instance;
 		if (coopSession == null || !coopSession.Active || coopSession.Players.Count < 2 || !instance || !instance.IsGameplayScene() || instance.IsLoadingSceneTransition || Plugin.Self.Panel)
 		{
+			NativeProbeReason = "session-or-F8";
 			return;
 		}
 		GameObject gameObject = GameObject.FindWithTag("Charms Pane");
 		if (!gameObject || !gameObject.activeInHierarchy)
 		{
+			NativeProbeReason = "pane-hidden";
 			return;
 		}
 		GameCameras instance2 = GameCameras.instance;
 		if (!instance2 || !instance2.hudCamera)
 		{
+			NativeProbeReason = "hud-camera-missing";
 			return;
 		}
-		Vector3 vector = instance2.hudCamera.WorldToViewportPoint(gameObject.transform.position);
-		if (vector.z <= 0f || vector.x < 0.05f || vector.x > 0.95f || vector.y < 0.05f || vector.y > 0.95f)
+		if (nativePane != gameObject || Time.unscaledTime >= nextBoardProbe)
 		{
-			return;
-		}
-		if (nativePane != gameObject)
-		{
+			nextBoardProbe = Time.unscaledTime + 0.5f;
 			nativePane = gameObject;
 			nativeBoards = gameObject.GetComponentsInChildren<InvCharmBackboard>(includeInactive: true);
 			if (nativeBoards.Length == 0)
 			{
 				nativeBoards = UnityEngine.Object.FindObjectsOfType<InvCharmBackboard>();
 			}
+			foreach (InvCharmBackboard board in nativeBoards)
+				if (board && board.charmNum > 40 && !string.IsNullOrEmpty(board.gotCharmString)) CharmExtensions.Register(board.charmNum);
 		}
+		if (!CharmMenuVisibility.Visible(gameObject, instance2.hudCamera, nativeBoards, out var anchor))
+		{
+			NativeAnchor = anchor;
+			NativeProbeReason = "catalog-offscreen";
+			return;
+		}
+		NativeAnchor = anchor;
+		NativeProbeReason = "visible";
 		nativeVisible = true;
 	}
 
@@ -135,7 +148,7 @@ internal static class Charms
 
 	internal static int FirstOwned(PlayerData data)
 	{
-		for (int i = 1; i <= 40; i++)
+		foreach (int i in CharmExtensions.Ids())
 		{
 			if (data.GetBool("gotCharm_" + i))
 			{
@@ -151,13 +164,22 @@ internal static class Charms
 		InvCharmBackboard[] array = NativeBoards;
 		foreach (InvCharmBackboard invCharmBackboard in array)
 		{
-			if ((bool)invCharmBackboard && invCharmBackboard.charmNum >= 1 && invCharmBackboard.charmNum <= 40)
+			if ((bool)invCharmBackboard && invCharmBackboard.charmNum >= 1)
 			{
 				Vector3 position = invCharmBackboard.transform.position;
-				list.Add(new CharmCell(invCharmBackboard.charmNum, position.x, position.y, data.GetBool("gotCharm_" + invCharmBackboard.charmNum)));
+				bool owned = !string.IsNullOrEmpty(invCharmBackboard.gotCharmString) && CharmExtensions.Owned(data, invCharmBackboard.charmNum);
+				list.Add(new CharmCell(invCharmBackboard.charmNum, position.x, position.y, owned));
 			}
 		}
 		return CharmGridRules.Next(current, dx, dy, list);
+	}
+
+	internal static int EditorNeighbor(int current, int direction)
+	{
+		int[] ids = CharmExtensions.Ids();
+		int index = Array.IndexOf(ids, current);
+		if (index < 0) return ids[0];
+		return ids[(index + direction + ids.Length) % ids.Length];
 	}
 
 	internal static void Freeze(CoopSession s)
@@ -198,9 +220,12 @@ internal static class Charms
 		}
 		Array.Clear(submitHeld, 0, 8);
 		wasNative = false;
+		RoleSystem.ClearNativeFocus();
+		CharmCatalogTint.Restore();
 		nativeFrame = -1;
 		nativePane = null;
 		nativeBoards = new InvCharmBackboard[0];
+		nextBoardProbe = 0f;
 		nativeVisible = false;
 		CharmNativeUi.Release();
 		CharmMenuExit.OnExit();
@@ -224,7 +249,7 @@ internal static class Charms
 			p.Charms.Read(data);
 			return;
 		}
-		p.Charms.Initialize(data, save.Charms[p.Index] ?? (data.equippedCharms ?? new List<int>()).ToArray());
+		p.Charms.Initialize(data, VoidHeartRules.Include(data, save.Charms[p.Index] ?? (data.equippedCharms ?? new List<int>()).ToArray()));
 		UpdateMaximum(p, data, heal: false);
 	}
 
@@ -242,6 +267,8 @@ internal static class Charms
 		{
 			Local8Mod.Save.Charms[player.Index] = player.Charms.Ids();
 		}
+		PlayerProfiles.Capture(s);
+		PlayerProfiles.Dirty();
 	}
 
 	internal static void UpdateMaximum(PlayerSlot p, PlayerData data, bool heal)
@@ -280,21 +307,30 @@ internal static class Charms
 	{
 		if (p != null)
 		{
+			Select(p);
 			Editing = true;
-			Selected = p.Index;
-			Cursor = 1;
-			openedAt = Time.unscaledTime;
 			Plugin.Self.SetPanel(open: true);
 		}
 	}
 
+	internal static void Select(PlayerSlot p)
+	{
+		if (p == null || p.Index < 0 || p.Index >= 8) return;
+		if (Editing && Selected >= 0 && Selected < 8) editorCursors[Selected] = Cursor;
+		Selected = Hud.selected = p.Index;
+		Cursor = CharmExtensions.Contains(editorCursors[Selected]) ? editorCursors[Selected] : FirstOwned(Plugin.Self.Session.Data);
+		openedAt = Time.unscaledTime;
+	}
+
 	internal static void Close()
 	{
+		if (Editing && Selected >= 0 && Selected < 8) editorCursors[Selected] = Cursor;
 		Editing = false;
 	}
 
 	internal static void InputTick(CoopSession s)
 	{
+		VoidHeartRules.Ensure(s);
 		if (NativeMenuOpen && !Plugin.Self.Panel)
 		{
 			NativeInput(s);
@@ -325,19 +361,19 @@ internal static class Charms
 			}
 			if (actions.left.WasPressed)
 			{
-				Cursor = (Cursor + 38) % 40 + 1;
+				Cursor = EditorNeighbor(Cursor, -1);
 			}
 			if (actions.right.WasPressed)
 			{
-				Cursor = Cursor % 40 + 1;
+				Cursor = EditorNeighbor(Cursor, 1);
 			}
 			if (actions.up.WasPressed)
 			{
-				Cursor = (Cursor + 29) % 40 + 1;
+				Cursor = EditorNeighbor(Cursor, -10);
 			}
 			if (actions.down.WasPressed)
 			{
-				Cursor = (Cursor + 9) % 40 + 1;
+				Cursor = EditorNeighbor(Cursor, 10);
 			}
 			if (actions.menuSubmit.WasPressed)
 			{
@@ -367,26 +403,31 @@ internal static class Charms
 		PlayerData data = session.Data;
 		if (!CanEdit(p))
 		{
-			Plugin.Self.Notice("Descansa en un banco y permanece junto a el para cambiar los amuletos.");
+			Plugin.Self.Notice(UiLocalization.Get("charms.bench"));
 		}
 		else
 		{
-			if (id < 1 || id > 40)
+			if (!CharmExtensions.Contains(id))
 			{
 				return;
 			}
-			bool flag = !p.Charms.Equipped[id - 1];
+			bool flag = !p.Charms.IsEquipped(id);
+			if (id == 36 && VoidHeartRules.Acquired(data))
+			{
+				Plugin.Self.Notice(UiLocalization.Get("charms.void_locked"));
+				return;
+			}
 			if (flag && !data.GetBool("gotCharm_" + id))
 			{
 				return;
 			}
-			if (!p.Charms.Equipped[id - 1] && id >= 23 && id <= 25 && data.GetBool("brokenCharm_" + id))
+			if (flag && id >= 23 && id <= 25 && data.GetBool("brokenCharm_" + id))
 			{
 				Plugin.Self.Notice("Repara este amuleto antes de equiparlo.");
 				return;
 			}
 			int cost = Math.Max(0, data.GetInt("charmCost_" + id));
-			if (!p.Charms.Equipped[id - 1] && !CoopRules.CanEquip(p.Charms.Used, cost, data.charmSlots, data.canOvercharm))
+			if (flag && !CoopRules.CanEquip(p.Charms.Used, cost, data.charmSlots, data.canOvercharm))
 			{
 				Plugin.Self.Notice("No quedan muescas suficientes.");
 				return;
@@ -420,7 +461,7 @@ internal static class Charms
 	{
 		try
 		{
-			return global::Language.Language.Get("CHARM_NAME_" + id, "UI");
+			return global::Language.Language.Get(CharmPresentation.Key("CHARM_NAME_", id), "UI");
 		}
 		catch
 		{
@@ -432,7 +473,7 @@ internal static class Charms
 	{
 		try
 		{
-			return global::Language.Language.Get("CHARM_DESC_" + id, "UI").Replace("<br>", "\n");
+			return global::Language.Language.Get(CharmPresentation.Key("CHARM_DESC_", id), "UI").Replace("<br>", "\n");
 		}
 		catch
 		{
@@ -442,6 +483,12 @@ internal static class Charms
 
 	internal static string SanitizeLocalized(string key, string sheet, string value)
 	{
+		// Resolve the ten-language resource before the legacy fallback changes
+		// the sheet name to the current language (which hid every newer UI key).
+		if (sheet == "LOCAL8" && key != null && RoleText.Has("ui." + key))
+		{
+			return UiLocalization.Get(key);
+		}
 		if (sheet == "LOCAL8")
 		{
 			sheet = global::Language.Language.CurrentLanguage().ToString();
@@ -1618,22 +1665,19 @@ internal static class Charms
 	{
 		try
 		{
-			if (icons.TryGetValue(id, out var value) && (bool)value)
-			{
-				return value;
-			}
-			CharmIconList instance = CharmIconList.Instance;
-			if (!instance)
-			{
-				return null;
-			}
-			Sprite sprite = instance.GetSprite(id);
+			Sprite sprite = CharmPresentation.Sprite(id);
+			icons.TryGetValue(id, out var value);
+			if (sprite && value && iconSources.TryGetValue(id, out var source) && source == sprite) return value;
+			if (value) UnityEngine.Object.Destroy(value);
+			icons.Remove(id);
+			iconSources.Remove(id);
 			if (!sprite)
 			{
 				return null;
 			}
 			value = HudAssets.FromSprite(sprite);
 			icons[id] = value;
+			iconSources[id] = sprite;
 			return value;
 		}
 		catch (Exception ex)
@@ -1655,5 +1699,13 @@ internal static class Charms
 			}
 		}
 		icons.Clear();
+		iconSources.Clear();
+		CharmPresentation.Reset();
+		CharmMenuDiagnostics.Reset();
+		CharmExtensions.Reset();
 	}
+
+	private static readonly Dictionary<int, Sprite> iconSources = new Dictionary<int, Sprite>();
+	internal static string NativeProbeReason = "unavailable";
+	internal static Vector3 NativeAnchor;
 }

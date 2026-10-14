@@ -77,6 +77,12 @@ internal static class ActorRecovery
 			component.stopInvulnerablePulse();
 		}
 		Reflect.Call(hero, "CancelAttack");
+		// HeroControllerStates.Reset deliberately omits these fields in vanilla.
+		// Parking/forcing the Superdash FSM to Inactive bypasses its normal stop
+		// state, so a guest could still report a flight while already stationary.
+		hero.cState.superDashing = false;
+		hero.cState.freezeCharge = false;
+		NativeDashEffects.Stop(p);
 		PlayMakerFSM[] componentsInChildren = hero.GetComponentsInChildren<PlayMakerFSM>(includeInactive: true);
 		foreach (PlayMakerFSM playMakerFSM in componentsInChildren)
 		{

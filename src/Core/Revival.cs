@@ -87,6 +87,7 @@ internal static class Revival
 					s.Recover(playerSlot3, respawn: true, playerSlot2.Hero.transform.position);
 				}
 				playerSlot3.HealFlashUntil = Time.unscaledTime + 0.7f;
+				AdventureStats.Revive(playerSlot2);
 				Plugin.Self.Notice("P" + (playerSlot2.Index + 1) + " ha reanimado a P" + (playerSlot3.Index + 1) + ".");
 				Diagnostics.Write("REVIVE COMPLETE P" + (playerSlot3.Index + 1) + " by P" + (playerSlot2.Index + 1) + " soul=" + playerSlot2.Vitals.Soul + " hp=" + playerSlot2.Vitals.Health + " reserve=" + playerSlot2.Vitals.Reserve);
 				for (int j = 0; j < live.Length; j++)

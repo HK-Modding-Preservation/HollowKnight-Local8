@@ -127,6 +127,9 @@ internal static class CombatEffects
 
 	internal static void Install()
 	{
+		DamageAudioGuard.Install();
+		DamageParticleBudget.Install();
+		RoarMotionRecovery.Install();
 		On.GameManager.FreezeMoment_float_float_float_float += Freeze;
 		On.HeroAudioController.PlaySound += HeroSound;
 		On.AudioEvent.SpawnAndPlayOneShot += Audio;
@@ -134,6 +137,9 @@ internal static class CombatEffects
 
 	internal static void Uninstall()
 	{
+		RoarMotionRecovery.Uninstall();
+		DamageParticleBudget.Uninstall();
+		DamageAudioGuard.Uninstall();
 		On.GameManager.FreezeMoment_float_float_float_float -= Freeze;
 		On.HeroAudioController.PlaySound -= HeroSound;
 		On.AudioEvent.SpawnAndPlayOneShot -= Audio;

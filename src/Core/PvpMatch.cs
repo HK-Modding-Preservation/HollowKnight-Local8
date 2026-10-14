@@ -224,35 +224,18 @@ internal static class PvpMatch
 		EmergencyWarp.CancelAll();
 		requested = false;
 		roster.Clear();
+		string spellIssue=PvpSpellOnly.StartIssue(s);
+		if(spellIssue.Length>0){StartIssue=spellIssue;Plugin.Self.Notice(spellIssue);Plugin.Self.SetPanel(open:true);return false;}
 		int num = 0;
+		var prepared = new List<Before>();
+		if (PvpStartPosition.Modal || ScriptedParty.Active || TransitionVote.Pending)
+		{ StartIssue = UiLocalization.Get("pvp.finish_action"); Plugin.Self.Notice(StartIssue); Plugin.Self.SetPanel(true); return false; }
 		foreach (PlayerSlot player in s.Players)
 		{
-			if (!player.Connected)
-			{
-				return Reject(player, UiLocalization.Get("pvp.disconnected"));
-			}
-			if (!player.Ready || !player.Hero)
-			{
-				return Reject(player, UiLocalization.Get("pvp.player_loading"));
-			}
-			if (!player.Alive)
-			{
-				return Reject(player, UiLocalization.Get("pvp.must_alive"));
-			}
-			if (player.Vitals.AtBench && !player.Hero.controlReqlinquished)
-			{
-				player.Vitals.AtBench = false;
-				s.Commit(player);
-			}
-			if (player.Hero.controlReqlinquished)
-			{
-				return Reject(player, player.Vitals.AtBench ? UiLocalization.Get("pvp.leave_bench") : UiLocalization.Get("pvp.finish_action"));
-			}
+			if (!PvpStartPosition.Try(s, player, out var startAt, out var reason)) return Reject(player, reason);
 			Bounds bounds = DuelGround.Body(player);
-			if (!DuelGround.Safe(player, player.Hero.transform.position, bounds.center - player.Hero.transform.position, bounds.size, out var reason))
-			{
-				return Reject(player, reason);
-			}
+			prepared.Add(new Before { Player = player, Position = startAt, Offset = bounds.center - player.Hero.transform.position,
+				Size = bounds.size, Health = player.Vitals.Health, Blue = player.Vitals.Blue, Soul = player.Vitals.Soul, Reserve = player.Vitals.Reserve });
 			sides[num] = PvpRules.Side(player.Index, PvpCombat.Team(player));
 			alive[num++] = true;
 		}
@@ -263,26 +246,13 @@ internal static class PvpMatch
 			Plugin.Self.SetPanel(open: true);
 			return false;
 		}
-		foreach (PlayerSlot player2 in s.Players)
-		{
-			Bounds bounds2 = DuelGround.Body(player2);
-			roster.Add(new Before
-			{
-				Player = player2,
-				Position = player2.Hero.transform.position,
-				Offset = bounds2.center - player2.Hero.transform.position,
-				Size = bounds2.size,
-				Health = player2.Vitals.Health,
-				Blue = player2.Vitals.Blue,
-				Soul = player2.Vitals.Soul,
-				Reserve = player2.Vitals.Reserve
-			});
-		}
+		foreach (var before in prepared) { PvpStartPosition.Prepare(s, before.Player); roster.Add(before); }
 		round = 0;
 		bestOf = PvpRules.SeriesLength(Local8Mod.Settings.DuelBestOf);
 		seriesWins.Clear();
 		CoopShades.Reset();
 		PvpCharms.Begin(s);
+		PvpSpellOnly.Begin(s);
 		NextRound(s);
 		return true;
 	}
@@ -300,6 +270,7 @@ internal static class PvpMatch
 			goto IL_01e3;
 		}
 		state = 1;
+		PvpSpellOnly.Round();
 		remaining = 3f;
 		round++;
 		Result = "";
@@ -476,6 +447,7 @@ internal static class PvpMatch
 			return;
 		}
 		PvpCharms.End();
+		PvpSpellOnly.End();
 		requested = false;
 		state = 0;
 		remaining = 0f;

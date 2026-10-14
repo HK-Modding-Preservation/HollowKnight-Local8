@@ -6,28 +6,36 @@ namespace KO.HollowKnight8;
 
 internal static class Reflect
 {
-	private static readonly Dictionary<string, FieldInfo> Fields = new Dictionary<string, FieldInfo>();
+	private static readonly Dictionary<Type, Dictionary<string, FieldInfo>> Fields = new Dictionary<Type, Dictionary<string, FieldInfo>>();
 
-	private static readonly Dictionary<string, MethodInfo> Methods = new Dictionary<string, MethodInfo>();
+	private static readonly Dictionary<Type, Dictionary<string, MethodInfo>> Methods = new Dictionary<Type, Dictionary<string, MethodInfo>>();
 
 	internal static FieldInfo Field(Type type, string name)
 	{
-		string key = type.FullName + ":" + name;
-		if (!Fields.TryGetValue(key, out var value))
+		if (!Fields.TryGetValue(type, out var members))
+		{
+			members = new Dictionary<string, FieldInfo>();
+			Fields[type] = members;
+		}
+		if (!members.TryGetValue(name, out var value))
 		{
 			value = type.GetField(name, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-			Fields[key] = value;
+			members[name] = value;
 		}
 		return value;
 	}
 
 	internal static MethodInfo Method(Type type, string name)
 	{
-		string key = type.FullName + ":" + name;
-		if (!Methods.TryGetValue(key, out var value))
+		if (!Methods.TryGetValue(type, out var members))
+		{
+			members = new Dictionary<string, MethodInfo>();
+			Methods[type] = members;
+		}
+		if (!members.TryGetValue(name, out var value))
 		{
 			value = type.GetMethod(name, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-			Methods[key] = value;
+			members[name] = value;
 		}
 		return value;
 	}

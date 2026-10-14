@@ -130,7 +130,7 @@ internal static class RoleEffects {
      if(hp>=q.CurrentMaxHealth){full++;continue;}
      if(!RoleHealingRules.Contains(delta.x,delta.y)){outside++;continue;}
      q.Hero.AddHealth(1);s.Data.health=Math.Min(s.Data.health,q.CurrentMaxHealth);q.Capture(s.Data);
-     if(s.Data.health>hp){count++;RoleAura.Received(q);}
+     if(s.Data.health>hp){count++;AdventureStats.Given(p,s.Data.health-hp);RoleAura.Received(q);}
     }
    }
    RoleAura.Pulse(p);

@@ -37,8 +37,10 @@ internal static class ShadeCloakRitual {
   // An actor's ordinary Spell Control can contain an upgrade branch too.
   // It becomes a ritual source only at the real level-change call below,
   // never merely because a heal/teleport elsewhere takes control.
-  if(f.GameObject.GetComponentInParent<HeroController>())return null;
   Probe probe;if(unrecognized.TryGetValue(f,out probe)&&probe.States==f.States&&Time.unscaledTime<probe.Next)return null;
+  // A live negative probe returns null both with and without a hero ancestor.
+  // Check it before repeating the native hierarchy search on every broadcast.
+  if(f.GameObject.GetComponentInParent<HeroController>())return null;
   if(f.Name=="Get Shadow Dash"&&Scenes.GetActiveScene().name=="Abyss_10")kind="Shade Cloak";
   else if(f.Name=="Scream Get"&&f.GameObject.name=="Scream 2 Get"&&Scenes.GetActiveScene().name=="Abyss_12")kind="Abyss Shriek";
   else if(f.States!=null)foreach(var state in f.States){if(state==null||state.Actions==null)continue;
@@ -190,6 +192,7 @@ internal static class ShadeCloakRitual {
   var s=Plugin.Self?Plugin.Self.Session:null;
   if(active||s==null||!s.Active||s.Players.Count<2||s.TeamWipe||PvpMatch.Running||CoopEnding.Active||p==null||!p.Alive||!p.Ready||!p.Connected||!s.Players.Contains(p)||Kind(f)==null)return false;
   var gm=GameManager.instance;if(!gm||gm.IsLoadingSceneTransition||!gm.HasFinishedEnteringScene)return false;
+  SharedAcquisition.ReleasePoses();
   session=s;collector=p;primary=p.Hero;source=f;scene=Scenes.GetActiveScene().handle;
   elapsed=clearFor=0;cardSeen=nativeDone=false;card=null;ritualKind=Kind(f);active=true;
   // Never stop or replay the collector's animator, body or coroutines.
@@ -216,6 +219,7 @@ internal static class ShadeCloakRitual {
  internal static bool Combined(bool native)=>native||active;
  internal static bool Holds(bool native,PlayerSlot p)=>native||active&&p!=null&&actors.Exists(a=>a.Player==p&&a.Hero&&p.Hero==a.Hero&&p.Alive&&p.Ready);
  internal static bool HoldsFsm(PlayerSlot p,Fsm f){
+  if(SoulAcquisitionRitual.Holds(p))return SoulAcquisitionRitual.HoldsFsm(p,f);
   // PoolSpawn tags the get-item UI with its owner too. Actor suspension must
   // not suspend that UI's jump/submit listeners or the world pickup itself.
   if(active&&(f==source||PickupCard.InputOwner(f)!=null||InteractionRouter.IsUi(f)))return false;

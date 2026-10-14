@@ -7,7 +7,7 @@ internal static class PvpCharms {
  static readonly List<Before> before=new List<Before>();static CoopSession session;static bool allowed;
  internal static bool Active {get{return session!=null;}}
  internal static bool Allowed {get{return Active&&allowed;}}
- static CharmLoadout Copy(CharmLoadout source){var c=new CharmLoadout();Array.Copy(source.Equipped,c.Equipped,40);c.Order=new List<int>(source.Order);c.Used=source.Used;c.Overcharmed=source.Overcharmed;return c;}
+ static CharmLoadout Copy(CharmLoadout source){var c=new CharmLoadout();Array.Copy(source.Equipped,c.Equipped,40);c.Extra.UnionWith(source.Extra);c.Order=new List<int>(source.Order);c.Used=source.Used;c.Overcharmed=source.Overcharmed;return c;}
  internal static void Begin(CoopSession s){
   End();if(s==null||!s.Active)return;session=s;allowed=PvpArena.Options.AllowCharms;
   foreach(var p in s.Players)before.Add(new Before{Player=p,Charms=Copy(p.Charms),Maximum=p.Vitals.MaxHealth,Joni=p.Vitals.Joni});

@@ -1,0 +1,11 @@
+if (Time.unscaledTime - p2.LastDamageAt > 4f && p2.ProtectionUntil <= 0f && !p2.Vitals.Invincible && !p2.Hero.cState.shadowDashing && !p2.Hero.cState.transitioning)
+					{
+						InvulnerablePulse component = p2.Hero.GetComponent<InvulnerablePulse>();
+						if ((bool)component && Reflect.Get(component, "pulsing", fallback: false))
+						{
+							component.stopInvulnerablePulse();
+							p2.Hero.cState.invulnerable = false;
+							p2.Hero.cState.recoiling = false;
+							Diagnostics.Write("DAMAGE pulse reset P" + (p2.Index + 1));
+						}
+					}

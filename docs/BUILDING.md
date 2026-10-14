@@ -1,25 +1,27 @@
-# Building Hollow Knight 8-Player Co-op
+# Building Hollow Knight 8-Player Co-op v0.11.0
 
-This is the complete source for public **v0.10.0**, targeting **Hollow Knight 1.5.78.11833** and its matching Modding API. No previous mod DLL is needed. Game/Team Cherry assemblies and build outputs are excluded.
+This is the complete source used for the public v0.11.0 DLL, with alpha227 gameplay and release metadata `0.11.0` / `0.11.0.0`. No previous mod DLL is a build input.
 
 ## Canonical release build
 
-Requirements: Python 3, **.NET SDK 8.0.408**, and the matching Modding API-patched game's `hollow_knight_Data/Managed` directory. That directory must contain `Assembly-CSharp.dll`, `MMHOOK_Assembly-CSharp.dll`, `PlayMaker.dll`, `MMHOOK_PlayMaker.dll`, `mscorlib.dll` and the matching Unity/framework references.
-
-From this source root:
+Requirements: Python 3, **.NET SDK 8.0.408**, and the matching Modding API-patched **Hollow Knight 1.5.78.11833** `hollow_knight_Data/Managed` directory. Game/API assemblies are not redistributed.
 
 ```bash
 python build.py --managed "YOUR_HOLLOW_KNIGHT_MANAGED_DIRECTORY"
 ```
 
-Use `--dotnet` to select an SDK executable, or `HK_MANAGED_DIR` to supply the reference directory. `--output` selects the output file; the default is `artifacts/HollowKnightLocal8.dll`. References remain outside the source tree. The build script uses Roslyn directly with optimization, deterministic output and path mapping, without PDBs.
+Use `--dotnet` to select the SDK executable and `--output` for the DLL destination; the default is `artifacts/HollowKnightLocal8.dll`. `HK_MANAGED_DIR` can supply the reference directory. The build uses Roslyn directly with optimization, deterministic output, path mapping and no PDBs.
 
-The public DLL was compiled with this command path and the exact source/assets in this package. Recompilation after extracting the source ZIP was checked for byte-for-byte equality using the same SDK and reference set. Different compiler versions or game/API assemblies can produce a different binary.
+The reference directory must include the matching `Assembly-CSharp.dll`, `MMHOOK_Assembly-CSharp.dll`, `PlayMaker.dll`, `MMHOOK_PlayMaker.dll`, `mscorlib.dll`, Unity and framework references. Different compiler/reference versions can change the binary. An extracted source-package build is compared byte for byte with the release DLL.
 
-## IDE/MSBuild project
+## IDE project
 
-`HollowKnightLocal8.csproj` is provided for editing and conventional Release builds. Copy `LocalBuildProperties_example.props` to `LocalBuildProperties.props`, set `HKManagedDir` to your own reference directory, and build in Release. A .NET Framework 4.7.2 targeting pack may be needed for conventional MSBuild builds. The canonical Python/Roslyn path uses the game's references directly and does not download a targeting pack.
+`HollowKnightLocal8.csproj` targets net472. Copy `LocalBuildProperties_example.props` to `LocalBuildProperties.props`, set `HKManagedDir` and build Release. A .NET Framework 4.7.2 targeting pack may be needed for MSBuild. The canonical Python/Roslyn path uses the game references directly.
 
-The project preserves `HollowKnightLocal8`, `KO.HollowKnight8` and existing configuration identifiers. Public branding/version constants are centralized in `src/Core/ReleaseInfo.cs`; `Properties/AssemblyInfo.cs` consumes them. Embedded-resource logical names remain compatible with the runtime.
+`src/Core/ReleaseInfo.cs` centralizes the public name/version; `Properties/AssemblyInfo.cs` consumes it. The existing assembly name, namespace, configuration/save keys and embedded-resource names are retained.
 
-Do not commit `LocalBuildProperties.props`, `bin/`, `obj/`, `artifacts/`, compiler response files, game assemblies or debug output. See [source notes](SOURCE_NOTES.md).
+## Controlled tests
+
+The `tests/` runners accept `--dotnet`; some also require `--managed` for reference-contract or native-IL checks. These hosts execute production methods with explicit doubles, not Unity gameplay. See [validation](VALIDATION_v0.11.0.md).
+
+Do not commit local reference paths, game libraries, `LocalBuildProperties.props`, `bin`, `obj`, `artifacts`, PDBs, response files or user logs.

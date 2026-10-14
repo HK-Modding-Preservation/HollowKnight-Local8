@@ -8,7 +8,8 @@ namespace KO.HollowKnight8 {
 internal sealed class DarkEssenceFx:IDisposable {
  GameObject root;ParticleSystem[] particles;float emit;bool burst;
  readonly System.Collections.Generic.List<Material> materials=new System.Collections.Generic.List<Material>();
- static Texture2D artwork;static AudioClip sound;static GameObject cue;
+ static Texture2D artwork,soulArtwork;static AudioClip sound;static GameObject cue;
+ Color essence=new Color(0,0,0,.95f);
  static Texture2D Artwork(){
   if(artwork)return artwork;
   using(var stream=typeof(DarkEssenceFx).Assembly.GetManifestResourceStream("Local8.Dark.Essence")){
@@ -21,14 +22,32 @@ internal sealed class DarkEssenceFx:IDisposable {
  }
  internal static DarkEssenceFx Create(PlayerSlot p){
   if(p==null||p.Index==0||!p.Hero)return null;
-  var texture=Artwork();var shader=Shader.Find("Sprites/Default")??Shader.Find("Particles/Alpha Blended");
+  return Create(p,false);
+ }
+ // White version of the same transparent dream rosette. Keep a separate
+ // texture: recolouring the shadow material would affect every dark ritual.
+ static Texture2D SoulArtwork(){
+  if(soulArtwork)return soulArtwork;
+  using(var stream=typeof(DarkEssenceFx).Assembly.GetManifestResourceStream("Local8.Dark.Essence")){
+   if(stream==null)return null;var bytes=new byte[stream.Length];int offset=0;
+   while(offset<bytes.Length){int read=stream.Read(bytes,offset,bytes.Length-offset);if(read<=0)return null;offset+=read;}
+   var texture=new Texture2D(2,2,TextureFormat.RGBA32,false);
+   if(!ImageConversion.LoadImage(texture,bytes,false)){Object.Destroy(texture);return null;}
+   var pixels=texture.GetPixels32();for(int i=0;i<pixels.Length;i++)pixels[i]=new Color32(255,255,255,pixels[i].a);
+   texture.SetPixels32(pixels);texture.Apply(false,true);texture.name="Local8 Transparent Soul Essence";
+   texture.filterMode=FilterMode.Bilinear;texture.wrapMode=TextureWrapMode.Clamp;soulArtwork=texture;return texture;
+  }
+ }
+ internal static DarkEssenceFx CreateSoul(PlayerSlot p)=>p==null||!p.Hero?null:Create(p,true);
+ static DarkEssenceFx Create(PlayerSlot p,bool soul){
+  var texture=soul?SoulArtwork():Artwork();var shader=Shader.Find("Sprites/Default")??Shader.Find("Particles/Alpha Blended");
   // Missing artwork/shader must never fall back to the default opaque quad.
   if(!texture||!shader||p==null||!p.Hero)return null;
-  var fx=new DarkEssenceFx();
+  var fx=new DarkEssenceFx();if(soul)fx.essence=new Color(1,1,1,.8f);
   try{
-   fx.root=new GameObject("Local8 Shade Cloak Dark Essence P"+(p.Index+1));fx.root.transform.position=p.Hero.transform.position;fx.root.layer=p.Hero.gameObject.layer;
+   fx.root=new GameObject("Local8 "+(soul?"Soul White":"Shade Cloak Dark")+" Essence P"+(p.Index+1));fx.root.transform.position=p.Hero.transform.position;fx.root.layer=p.Hero.gameObject.layer;
    var ps=fx.root.AddComponent<ParticleSystem>();fx.particles=new[]{ps};ps.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
-   var main=ps.main;main.playOnAwake=false;main.loop=true;main.maxParticles=48;main.simulationSpeed=1;main.startLifetime=.65f;main.startSpeed=0;main.startSize=new ParticleSystem.MinMaxCurve(.3f,.48f);main.startColor=new Color(0,0,0,.95f);main.simulationSpace=ParticleSystemSimulationSpace.World;main.gravityModifier=0;
+   var main=ps.main;main.playOnAwake=false;main.loop=true;main.maxParticles=48;main.simulationSpeed=1;main.startLifetime=.65f;main.startSpeed=0;main.startSize=new ParticleSystem.MinMaxCurve(.3f,.48f);main.startColor=fx.essence;main.simulationSpace=ParticleSystemSimulationSpace.World;main.gravityModifier=0;
    var emission=ps.emission;emission.enabled=false;var shape=ps.shape;shape.enabled=false;
    var sheet=ps.textureSheetAnimation;sheet.enabled=false;
    var color=ps.colorOverLifetime;color.enabled=true;var gradient=new Gradient();
@@ -44,6 +63,9 @@ internal sealed class DarkEssenceFx:IDisposable {
    ps.Play();return fx;
   }catch{fx.Dispose();throw;}
  }
+ // The white ritual starts visibly in the native contact callback, rather
+ // than waiting for the next Update or for its emission ramp to fill.
+ internal void Prime(Vector3 at){Tick(at,0,1);}
  internal void Tick(Vector3 at,float elapsed,float strength){
   if(!root||particles==null)return;root.transform.position=at;
   emit+=Mathf.Min(.05f,Time.deltaTime)*24f*strength;int count=Mathf.Min(3,Mathf.FloorToInt(emit));emit-=count;
@@ -53,7 +75,7 @@ internal sealed class DarkEssenceFx:IDisposable {
     float angle=elapsed*2.3f+UnityEngine.Random.Range(0,Mathf.PI*2);float radius=UnityEngine.Random.Range(.95f,1.65f);
     var radial=new Vector3(Mathf.Cos(angle)*radius,Mathf.Sin(angle)*radius,0);
     var ep=new ParticleSystem.EmitParams();ep.position=at+radial+new Vector3(0,.3f,-.2f);
-    ep.startLifetime=.65f;ep.velocity=radial*(-1f/.65f);ep.startColor=new Color(0,0,0,.95f);ps.Emit(ep,1);
+    ep.startLifetime=.65f;ep.velocity=radial*(-1f/.65f);ep.startColor=essence;ps.Emit(ep,1);
    }
   }
  }

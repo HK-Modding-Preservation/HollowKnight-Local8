@@ -11,7 +11,10 @@ internal static class RoleUI {
  static float nextFont;
  static readonly Dictionary<Renderer,bool> hidden=new Dictionary<Renderer,bool>();
  static GameObject hiddenPane;
- static float nextHide;
+ static int hideFrame=-1;
+ static readonly List<Renderer> paneRenderers=new List<Renderer>();
+ static readonly List<Renderer> departedRenderers=new List<Renderer>();
+ static readonly HashSet<Transform> catalogRoots=new HashSet<Transform>();
  static readonly Rect[] HorizontalUV={
   new Rect(20,128,303,395), new Rect(413,128,279,395), new Rect(803,128,300,395),new Rect(1208,128,295,395),new Rect(1603,128,300,395),
   new Rect(145,547,350,370),new Rect(584,547,331,370),new Rect(1000,547,335,370),new Rect(1423,547,334,370)};
@@ -70,9 +73,10 @@ internal static class RoleUI {
   }finally{GUI.matrix=old;GUI.color=oc;GUI.depth=depth;}
  }
  internal static void DrawNative(CoopSession s,float w,float h,float scale){if(!Charms.NativeMenuOpen||s==null)return;Assets();
-  Rect panel=new Rect(w*.610f,h*.192f,w*.317f,h*.637f);
-  Box(panel,new Color(.012f,.01f,.018f,.98f));Text(new Rect(panel.x,panel.y+4,panel.width,28),RoleText.Get("roles"),23,Color.white);
-  float gridY=panel.y+39,gridH=panel.height-185,cellW=(panel.width-24)/2,cellH=gridH/5;
+  bool compact=s.Players.Count>4;
+  Rect panel=CharmMenuLayout.Roles(w,h,s.Players.Count);
+  CharmMenuBackdrop.Draw(panel,h,new Color(.012f,.01f,.018f,1f));Text(new Rect(panel.x,panel.y+4,panel.width,28),RoleText.Get("roles"),compact?20:23,Color.white);
+  float gridY=panel.y+39,gridH=panel.height-(compact?145:185),cellW=(panel.width-24)/2;
   for(int i=0;i<RoleCatalog.All.Length;i++){int split=(RoleCatalog.All.Length+1)/2,col=i<split?0:1,row=col==0?i:i-split;int count=col==0?split:RoleCatalog.All.Length-split;
    float rowY=gridY+row*gridH/count;float height=gridH/count;Rect cell=new Rect(panel.x+12+col*cellW,rowY,cellW,height);
    if(i<VerticalUV.Length)Art(new Rect(cell.x+cellW*.12f,cell.y+height*.25f,cellW*.27f,height*.48f),vertical,VerticalUV[i],Color.white);
@@ -80,29 +84,40 @@ internal static class RoleUI {
    string name=RoleCatalog.All[i].Name;float nameSize=Mathf.Clamp(cellW/12,11,16);
    while(nameSize>9&&Style(nameSize,Color.white,TextAnchor.MiddleCenter,true).CalcHeight(new GUIContent(name),nameRect.width)>nameRect.height)nameSize--;
    Text(nameRect,name,nameSize,Color.white,TextAnchor.MiddleCenter,true);
-   int owners=0,overlaps=0;foreach(PlayerSlot p in s.Players){RoleState st=RoleSystem.State(p);if(st.Chosen==i){int column=owners%4,rr=owners/4;Text(new Rect(cell.x+cellW*.42f+column*cellW*.11f,cell.y+height*.42f+rr*13,cellW*.11f,17),"P"+(p.Index+1),14,p.Color);owners++;}}
-   foreach(PlayerSlot p in s.Players)if(Charms.NativeCursor[p.Index]==100+i){Selection(new Rect(cell.x+2,cell.y+1,cell.width-4,cell.height-2),p.Color,overlaps++,true);Text(new Rect(cell.x+14+(overlaps-1)*22,cell.y-3,25,19),"P"+(p.Index+1),14,p.Color);}
+   int owners=0,overlaps=0;foreach(PlayerSlot p in s.Players){RoleState st=RoleSystem.State(p);if(st.Chosen==i){int column=owners%4,rr=owners/4;Text(new Rect(cell.x+cellW*.42f+column*cellW*.11f,cell.y+height*.42f+rr*(compact?11:13),cellW*.11f,compact?13:17),"P"+(p.Index+1),compact?11:14,p.Color);owners++;}}
+   foreach(PlayerSlot p in s.Players)if(Charms.NativeCursor[p.Index]==CharmExtensions.Role(i)){Selection(new Rect(cell.x+2,cell.y+1,cell.width-4,cell.height-2),p.Color,overlaps++,true);Text(new Rect(cell.x+14+(overlaps-1)*22,cell.y-3,25,19),"P"+(p.Index+1),14,p.Color);}
   }
   PlayerSlot described=null;foreach(PlayerSlot candidate in s.Players)if(candidate.Index==RoleSystem.LastMoved)described=candidate;
-  if(described!=null){RoleState state=RoleSystem.State(described);int id=Charms.NativeCursor[described.Index]>=100?state.Cursor:state.Chosen;Text(new Rect(panel.x+12,panel.yMax-136,panel.width-24,24),"P"+(described.Index+1)+"  ·  "+RoleCatalog.All[id].Name,14,described.Color);Text(new Rect(panel.x+14,panel.yMax-106,panel.width-28,71),RoleCatalog.All[id].Description,12,new Color(.87f,.88f,.91f),TextAnchor.UpperLeft,true);}
+  if(described!=null){RoleState state=RoleSystem.State(described);int id=CharmExtensions.IsRole(Charms.NativeCursor[described.Index])?state.Cursor:state.Chosen;Text(new Rect(panel.x+12,panel.yMax-(compact?96:136),panel.width-24,24),"P"+(described.Index+1)+"  ·  "+RoleCatalog.All[id].Name,14,described.Color);Text(new Rect(panel.x+14,panel.yMax-(compact?74:106),panel.width-28,compact?42:71),RoleCatalog.All[id].Description,compact?10:12,new Color(.87f,.88f,.91f),TextAnchor.UpperLeft,true);}
   Text(new Rect(panel.x+7,panel.yMax-29,panel.width-14,24),RoleText.Get("return_charms"),12,new Color(.72f,.73f,.8f),TextAnchor.MiddleCenter,true);
  }
  // Keep equipped charms and notches visible; replace only the description/name while this player browses roles.
- internal static void CardOverlay(PlayerSlot p,PlayerData data,Rect r){RoleState st=RoleSystem.State(p);bool browsing=Charms.NativeCursor[p.Index]>=100;
+ internal static void CardOverlay(PlayerSlot p,PlayerData data,Rect r){RoleState st=RoleSystem.State(p);bool browsing=CharmExtensions.IsRole(Charms.NativeCursor[p.Index]);
   if(!browsing)return;
-  RoleDefinition role=RoleCatalog.All[st.Cursor];float header=Mathf.Clamp(r.height*.19f,15,25);
+  RoleDefinition role=RoleCatalog.All[st.Cursor];float header=CharmCardUI.Header(r);
   Box(new Rect(r.x+37,r.y+2,r.width-42,header+1),new Color(.015f,.013f,.023f,1));Text(new Rect(r.x+40,r.y+3,r.width-48,header),role.Name,13,p.Color,TextAnchor.MiddleLeft);
   if(r.height>108){Rect desc=CharmCardUI.DescriptionRect(p,r);if(desc.height>15){Box(desc,new Color(.015f,.013f,.023f,1));Text(desc,role.Description,Mathf.Clamp(r.height/24,9,12),new Color(.92f,.91f,.95f),TextAnchor.UpperLeft,true);}}
 
  }
- internal static void BeforeCamera(Camera camera){if(!Charms.NativeMenuOpen){RestoreVanilla();return;}var gc=GameCameras.instance;if(gc==null||camera!=gc.hudCamera)return;GameObject pane=Charms.NativePane;if(!pane)return;
-  if(pane!=hiddenPane){RestoreVanilla();hiddenPane=pane;nextHide=0;}
-  if(Time.unscaledTime>=nextHide){nextHide=Time.unscaledTime+.5f;foreach(Renderer renderer in pane.GetComponentsInChildren<Renderer>(true)){if(renderer==null)continue;Vector3 v=camera.WorldToViewportPoint(renderer.bounds.center);Vector3 max=camera.WorldToViewportPoint(renderer.bounds.max);Vector3 min=camera.WorldToViewportPoint(renderer.bounds.min);
-   // Spatially restrict to the vanilla right-hand description, preserving borders, grid and pane navigation.
-   if(v.z>0&&v.x>.60f&&v.x<.94f&&v.y>.15f&&v.y<.83f&&Mathf.Abs(max.x-min.x)<.38f){if(!hidden.ContainsKey(renderer))hidden[renderer]=renderer.forceRenderingOff;}}}
-  foreach(var item in hidden)if(item.Key)item.Key.forceRenderingOff=true;
+ internal static void BeforeCamera(Camera camera){if(!Charms.NativeMenuOpen){RestoreVanilla();return;}var gc=GameCameras.instance;if(gc==null||camera!=gc.hudCamera)return;GameObject pane=Charms.NativePane;if(!pane){RestoreVanilla();return;}
+  if(pane!=hiddenPane){RestoreVanilla();hiddenPane=pane;}
+  if(hideFrame!=Time.frameCount){hideFrame=Time.frameCount;float scale=Mathf.Clamp(Screen.height/900f,.65f,1.6f),w=Screen.width/scale,h=Screen.height/scale;int players=Plugin.Self==null||Plugin.Self.Session==null?0:Plugin.Self.Session.Players.Count;
+   catalogRoots.Clear();foreach(var board in Charms.NativeBoards){if(!board)continue;catalogRoots.Add(board.transform);if(board.charmObject)catalogRoots.Add(board.charmObject.transform);if(board.newOrb)catalogRoots.Add(board.newOrb.transform);}
+   pane.GetComponentsInChildren<Renderer>(true,paneRenderers);
+   foreach(Renderer renderer in paneRenderers){if(!renderer)continue;if(renderer.GetComponentInParent<InvCharmBackboard>()||CatalogSprite(renderer.transform)||NativeCursor(renderer.transform)){RestoreRenderer(renderer);continue;}
+    Vector3 center=camera.WorldToViewportPoint(renderer.bounds.center),max=camera.WorldToViewportPoint(renderer.bounds.max),min=camera.WorldToViewportPoint(renderer.bounds.min);
+    if(center.z<=0){RestoreRenderer(renderer);continue;}
+    Rect bounds=new Rect(Mathf.Min(min.x,max.x)*w,(1f-Mathf.Max(min.y,max.y))*h,Mathf.Abs(max.x-min.x)*w,Mathf.Abs(max.y-min.y)*h);
+    if(CharmMenuLayout.Replaced(bounds,w,h,players)){if(!hidden.ContainsKey(renderer))hidden[renderer]=renderer.forceRenderingOff;}else RestoreRenderer(renderer);
+   }
+  }
+  departedRenderers.Clear();foreach(var item in hidden)if(item.Key){if(item.Key.transform.IsChildOf(pane.transform))item.Key.forceRenderingOff=true;else {item.Key.forceRenderingOff=item.Value;departedRenderers.Add(item.Key);}}
+  foreach(var renderer in departedRenderers)hidden.Remove(renderer);
  }
- internal static void RestoreVanilla(){foreach(var item in hidden)if(item.Key)item.Key.forceRenderingOff=item.Value;hidden.Clear();hiddenPane=null;}
- internal static void Release(){RestoreVanilla();if(horizontal)UnityEngine.Object.Destroy(horizontal);if(vertical)UnityEngine.Object.Destroy(vertical);if(frame)UnityEngine.Object.Destroy(frame);if(verticalFrame)UnityEngine.Object.Destroy(verticalFrame);horizontal=vertical=frame=verticalFrame=null;nativeFont=null;}
+ static void RestoreRenderer(Renderer renderer){if(hidden.TryGetValue(renderer,out var previous)){renderer.forceRenderingOff=previous;hidden.Remove(renderer);}}
+ static bool CatalogSprite(Transform transform){for(var t=transform;t;t=t.parent)if(catalogRoots.Contains(t))return true;return false;}
+ static bool NativeCursor(Transform transform){for(var t=transform;t;t=t.parent)if(t.name.IndexOf("cursor",StringComparison.OrdinalIgnoreCase)>=0||t.name.IndexOf("selector",StringComparison.OrdinalIgnoreCase)>=0)return true;return false;}
+ internal static void RestoreVanilla(){CharmCatalogTint.Restore();foreach(var item in hidden)if(item.Key)item.Key.forceRenderingOff=item.Value;hidden.Clear();paneRenderers.Clear();departedRenderers.Clear();catalogRoots.Clear();hiddenPane=null;hideFrame=-1;}
+ internal static void Release(){RestoreVanilla();CharmMenuBackdrop.Release();if(horizontal)UnityEngine.Object.Destroy(horizontal);if(vertical)UnityEngine.Object.Destroy(vertical);if(frame)UnityEngine.Object.Destroy(frame);if(verticalFrame)UnityEngine.Object.Destroy(verticalFrame);horizontal=vertical=frame=verticalFrame=null;nativeFont=null;}
 }
 }

@@ -9,6 +9,15 @@ internal static class MenuInput
 	private static readonly KeyCode[] all = (KeyCode[])Enum.GetValues(typeof(KeyCode));
 
 	internal static bool Waiting;
+	private static int escapeFrame = -1;
+	internal static bool EscapeConsumed => escapeFrame == Time.frameCount;
+	internal static bool CloseOnEscape(bool panel)
+	{
+		if (!panel || Waiting || ActionKeys.Capturing != 0 || !KeypadInput.Pressed(KeyCode.Escape)) return false;
+		escapeFrame = Time.frameCount;
+		Diagnostics.Write("MENU Escape closed F8");
+		return true;
+	}
 
 	internal static KeyCode Key
 	{

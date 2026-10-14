@@ -8,12 +8,11 @@ internal static class PvpRoundClock {
  internal static string Format(float seconds){return RoundTimeRules.Format(seconds);}
  internal static bool Visible(float seconds){return RoundTimeRules.Visible(seconds);}
  internal static void Number(string label,ref int value,int min,int max,int step,float width,ref float row){
-  Migrate();var style=new GUIStyle(GUI.skin.label){fontSize=14};style.normal.textColor=Color.white;
-  GUI.Label(new Rect(8,row+5,width-170,28),label+": "+(value<=0?UiLocalization.Get("pvp.unlimited"):value.ToString()),style);
-  var button=new GUIStyle(GUI.skin.button){fontSize=14};
-  if(GUI.Button(new Rect(width-158,row,72,30),"-",button))value=Mathf.Max(0,value-30);
-  if(GUI.Button(new Rect(width-80,row,72,30),"+",button))value=Mathf.Min(600,value+30);
-  row+=39;
+  Migrate();var style=MenuTheme.Label;
+  GUI.Label(new Rect(8,row,width-178,34),label+": "+(value<=0?UiLocalization.Get("pvp.unlimited"):value.ToString()),style);
+  if(MenuTheme.Step(new Rect(width-148,row,65,34),false))value=Mathf.Max(0,value-30);
+  if(MenuTheme.Step(new Rect(width-73,row,65,34),true))value=Mathf.Min(600,value+30);
+  row+=41;
  }
  internal static string Banner(string original){
   if(PvpArena.Active)return PvpArena.Banner(original);

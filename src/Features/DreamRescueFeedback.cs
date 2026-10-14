@@ -9,7 +9,7 @@ internal static class DreamRescueFeedback {
  internal static void Before(CoopSession s,PlayerSlot[] live){
   var gm=GameManager.instance;var ui=UIManager.instance;var r=Plugin.Self;
   bool gameplay=s!=null&&s.Active&&s.Gameplay&&gm&&!gm.isPaused&&!gm.IsLoadingSceneTransition&&ui&&ui.uiState==GlobalEnums.UIState.PLAYING&&r&&!r.Panel&&!Charms.NativeMenuOpen&&!ScriptedParty.Active&&PickupCard.Owner==null&&InteractionRouter.ActivePlayer==null&&ShopMenuRouting.Buyer==null&&!StagMenuRouting.HasOwner;
-  for(int i=0;i<8;i++){var p=s==null?null:s.Players.Find(x=>x.Index==i);bool key=p!=null&&ActionKeys.Held(p);
+  for(int i=0;i<8;i++){var p=FramePlayers.FindByIndex(s==null?null:s.Players,i);bool key=p!=null&&ActionKeys.Held(p);
    if(!key){held[i]=0;reported[i]=false;continue;}
    if(!gameplay||p==null||!p.Hero||!p.Alive||!p.Ready||!p.Connected||p.ArenaTransfer||TransitionVote.Holding(p)||EmergencyWarp.Active(p)){held[i]=0;reported[i]=true;continue;}
    if(!reported[i])held[i]+=Mathf.Max(0,Time.unscaledDeltaTime);

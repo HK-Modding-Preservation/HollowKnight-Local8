@@ -119,7 +119,7 @@ internal static class CrystalDashCoop {
    if(!original)foreach(var ps in c.Hero.GetComponentsInChildren<ParticleSystem>(true)){var r=ps.GetComponent<ParticleSystemRenderer>();if(r&&r.sharedMaterial&&NativeParticleSource(ps.transform,c.Hero.transform)){original=ps;break;}}
    if(!original)return;
    c.TrailRoot=new GameObject("Local8 Linked Crystal Motes P"+(c.Player.Index+1));c.TrailRoot.layer=c.Hero.gameObject.layer;c.Trail=c.TrailRoot.AddComponent<ParticleSystem>();c.Trail.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
-   var main=c.Trail.main;main.playOnAwake=false;main.loop=true;main.maxParticles=40;main.startLifetime=new ParticleSystem.MinMaxCurve(.2f,.4f);main.startSpeed=0;main.startSize=new ParticleSystem.MinMaxCurve(.06f,.12f);main.startColor=tint;main.simulationSpace=ParticleSystemSimulationSpace.World;main.gravityModifier=0;
+   var main=c.Trail.main;main.playOnAwake=false;main.loop=true;main.maxParticles=16;main.startLifetime=new ParticleSystem.MinMaxCurve(.16f,.3f);main.startSpeed=0;main.startSize=new ParticleSystem.MinMaxCurve(.05f,.09f);main.startColor=tint;main.simulationSpace=ParticleSystemSimulationSpace.World;main.gravityModifier=0;
    var emission=c.Trail.emission;emission.enabled=false;var shape=c.Trail.shape;shape.enabled=false;
    var color=c.Trail.colorOverLifetime;color.enabled=true;var gradient=new Gradient();gradient.SetKeys(new[]{new GradientColorKey(Color.white,0),new GradientColorKey(Color.white,1)},new[]{new GradientAlphaKey(.55f,0),new GradientAlphaKey(.3f,.4f),new GradientAlphaKey(0,1)});color.color=gradient;
    var source=original.GetComponent<ParticleSystemRenderer>();var renderer=c.Trail.GetComponent<ParticleSystemRenderer>();renderer.sharedMaterials=source.sharedMaterials;renderer.renderMode=ParticleSystemRenderMode.Billboard;
@@ -129,7 +129,7 @@ internal static class CrystalDashCoop {
   }
   if(!c.Trail)return;var point=c.Hero.transform.position+new Vector3(0,.15f,-.1f);c.TrailRoot.transform.position=point;
   if(!c.HasPoint||(point-c.LastPoint).sqrMagnitude>144)c.LastPoint=point;
-  c.Emit+=Mathf.Min(Time.deltaTime,.05f)*(c.Flying?Mathf.Min(48,22+count*4):7);int n=Mathf.Min(4,Mathf.FloorToInt(c.Emit));c.Emit-=n;
+  c.Emit+=Mathf.Min(Time.deltaTime,.05f)*PerformanceTuning.CosmeticRate(c.Flying?Mathf.Min(16,8+count*2):3);int n=Mathf.Min(2,Mathf.FloorToInt(c.Emit));c.Emit-=n;
   for(int i=0;i<n;i++){var ep=new ParticleSystem.EmitParams();ep.position=Vector3.Lerp(c.LastPoint,point,(i+1f)/n)+new Vector3(UnityEngine.Random.Range(-.35f,.35f),UnityEngine.Random.Range(-.35f,.35f),0);ep.velocity=new Vector3(UnityEngine.Random.Range(-.5f,.5f),UnityEngine.Random.Range(-.25f,.65f),0);ep.startColor=tint;c.Trail.Emit(ep,1);}
   c.LastPoint=point;c.HasPoint=true;
  }

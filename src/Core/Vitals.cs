@@ -4,6 +4,7 @@ namespace KO.HollowKnight8;
 
 internal sealed class Vitals
 {
+	internal Vitals Copy() => (Vitals)MemberwiseClone();
 	internal int Health;
 
 	internal int Blue;

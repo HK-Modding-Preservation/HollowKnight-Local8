@@ -18,6 +18,12 @@ internal static class InteractionRouter
 
 		internal bool Busy;
 
+		internal HeroController ControlHero;
+
+		internal FsmState ControlState;
+
+		internal int ReturnedFrame = -1;
+
 		internal bool Bench;
 
 		internal bool Up;
@@ -41,6 +47,11 @@ internal static class InteractionRouter
 
 	private static readonly Dictionary<Fsm, Entry> entries = new Dictionary<Fsm, Entry>();
 
+	private static readonly InteractionAncestors<Entry> ancestors = new InteractionAncestors<Entry>();
+	private static readonly FsmTextCache textCache = new FsmTextCache();
+
+	internal static string RoutingPerformance => "interaction_queries=" + ancestors.Calls + " hierarchy_rebuilds=" + ancestors.Rebuilds;
+
 	private static readonly Dictionary<TriggerEnterEvent, Dictionary<Collider2D, PlayerSlot>> subscribedContacts = new Dictionary<TriggerEnterEvent, Dictionary<Collider2D, PlayerSlot>>();
 
 	private static readonly HashSet<Fsm> ignored = new HashSet<Fsm>();
@@ -52,6 +63,7 @@ internal static class InteractionRouter
 	private static int promptScanFrame = -1;
 
 	private static bool promptTextVisible;
+	internal static bool ActiveIsBench => active != null && active.Busy && active.Bench;
 
 	internal static PlayerSlot ActivePlayer
 	{
@@ -69,9 +81,65 @@ internal static class InteractionRouter
 		}
 	}
 
+	internal static bool Holds(PlayerSlot player)
+	{
+		if (player == null) return false;
+		foreach (Entry entry in entries.Values)
+		{
+			if (entry.Owner != player || !entry.Busy) continue;
+			Refresh(entry);
+			if (entry.Busy) return true;
+		}
+		return false;
+	}
+
+	internal static string ActiveSummary
+	{
+		get
+		{
+			PlayerSlot player = ActivePlayer;
+			Entry entry = active;
+			return player == null || entry == null ? "none" : "P" + (player.Index + 1)
+				+ " fsm=" + entry.Fsm.Name + " object=" + (entry.Fsm.GameObject ? entry.Fsm.GameObject.name : "missing")
+				+ " state=" + (entry.Fsm.ActiveState == null ? "none" : entry.Fsm.ActiveState.Name)
+				+ " claimed=" + !ReferenceEquals(entry.ControlHero, null) + " returned_frame=" + entry.ReturnedFrame;
+		}
+	}
+
+	internal static void ControlClaimed(Fsm source, HeroController hero)
+	{
+		CoopSession session = Plugin.Self == null ? null : Plugin.Self.Session;
+		if (session == null || !session.Active || !hero || source == null) return;
+		PlayerSlot player = session.Resolve(hero);
+		Entry entry = Describe(source);
+		if (entry == null || player == null || !Valid(player)) return;
+		entry.Owner = player;
+		entry.ControlHero = hero;
+		entry.ControlState = source.ActiveState;
+		entry.ReturnedFrame = -1;
+		entry.Busy = true;
+		active = entry;
+		Diagnostics.Write("INTERACTION control taken " + ActiveSummary);
+	}
+
+	internal static void ControlReturned(HeroController hero)
+	{
+		foreach (Entry entry in entries.Values)
+		{
+			if (entry.Busy && entry.ControlHero == hero && entry.ReturnedFrame < 0)
+			{
+				// RegainControl may be followed by more actions and nested events.
+				// Keep this owner through the complete frame of the native return.
+				entry.ReturnedFrame = Time.frameCount;
+				Diagnostics.Write("INTERACTION control returned P" + (entry.Owner.Index + 1)
+					+ " fsm=" + entry.Fsm.Name + " state=" + (entry.Fsm.ActiveState == null ? "none" : entry.Fsm.ActiveState.Name));
+			}
+		}
+	}
+
 	private static string Kind(Fsm f)
 	{
-		return (f.Name + " " + (f.GameObject ? f.GameObject.name : "")).ToLowerInvariant();
+		return textCache.Kind(f);
 	}
 
 	internal static bool IsUi(Fsm f)
@@ -115,6 +183,7 @@ internal static class InteractionRouter
 		}
 		if (entries.TryGetValue(f, out var value))
 		{
+			ancestors.Register(f.GameObject.transform, value);
 			return value;
 		}
 		if (ignored.Contains(f))
@@ -254,6 +323,7 @@ internal static class InteractionRouter
 		value.Triggers = list.ToArray();
 		value.Subscribed = list2.ToArray();
 		entries[f] = value;
+		ancestors.Register(f.GameObject.transform, value);
 		return value;
 	}
 
@@ -536,6 +606,14 @@ internal static class InteractionRouter
 
 	private static bool Request(Entry e, PlayerSlot p)
 	{
+		if (p.Hero.controlReqlinquished || (!e.Bench && (p.Vitals.AtBench || BenchSeats.Seated(p)))) return false;
+		GameManager manager = GameManager.instance;
+		var inventory = manager ? manager.inventoryFSM : null;
+		if (inventory && inventory.isActiveAndEnabled && inventory.gameObject.activeInHierarchy)
+		{
+			string state = inventory.ActiveStateName ?? "";
+			if (state == "Opened" || state == "Open" || state == "Open Current Pane" || state == "Tween Panes") return false;
+		}
 		if (p.Actions != null)
 		{
 			if (!e.Up || !p.Actions.up.IsPressed)
@@ -563,7 +641,9 @@ internal static class InteractionRouter
 		float num = float.MaxValue;
 		foreach (PlayerSlot player in session.Players)
 		{
-			if (Valid(player) && (Eligible(e, player) || player == touched) && Request(e, player) && (!e.Bench || (BenchSeatNear(e.Fsm, player) && !CompetingPrompt(player, e))))
+			// Range queries do not mutate gameplay. Check the actual request first;
+			// the proximity-based owner fallback below still runs for idle actors.
+			if (Valid(player) && Request(e, player) && (Eligible(e, player) || player == touched) && (!e.Bench || (BenchSeatNear(e.Fsm, player) && !CompetingPrompt(player, e))))
 			{
 				float sqrMagnitude = (PromptAnchor(e, player.Hero.transform.position) - (Vector2)player.Hero.transform.position).sqrMagnitude;
 				if (sqrMagnitude < num)
@@ -695,17 +775,47 @@ internal static class InteractionRouter
 
 	private static void Refresh(Entry e)
 	{
-		if (!Valid(e.Owner))
+		if (!Valid(e.Owner) || e.Fsm == null || !e.Fsm.GameObject || !e.Fsm.GameObject.activeInHierarchy
+			|| !ReferenceEquals(e.ControlHero, null) && !ReferenceEquals(e.ControlHero, e.Owner.Hero))
 		{
-			if (active == e)
-			{
-				active = null;
-			}
-			e.Busy = false;
+			End(e, "actor-or-object-lost");
 			e.Owner = null;
 			return;
 		}
-		bool flag = (e.Owner.Hero.controlReqlinquished || e.Owner.Vitals.AtBench) && (e.Busy || Time.unscaledTime - e.RequestedAt < 2f);
+		if (!ReferenceEquals(e.ControlHero, null))
+		{
+			if (e.ReturnedFrame >= 0)
+			{
+				if (Time.frameCount > e.ReturnedFrame)
+				{
+					if (e.Bench && e.Owner.Vitals.AtBench && Inside(e, e.Owner))
+					{
+						// Native benches return movement control while keeping their
+						// seated interaction alive. Preserve that existing behavior.
+						e.ControlHero = null;
+						e.ControlState = null;
+						e.ReturnedFrame = -1;
+					}
+					else End(e, "native-return");
+				}
+				return;
+			}
+			if (!e.Owner.Hero.controlReqlinquished && !(e.Bench && e.Owner.Vitals.AtBench))
+			{
+				e.ReturnedFrame = Time.frameCount;
+				return;
+			}
+			// An NPC back at its interaction prompt no longer owns the actor,
+			// even if a missed native return left its control flag set. Do not
+			// reset the actor from a routing getter; the movement guard can
+			// recover it after confirming sustained movement input.
+			if (!e.Bench && e.Fsm.ActiveState != e.ControlState && WaitingForRequest(e)) End(e, "fsm-ready");
+			return;
+		}
+		// Native benches may already be resting when the session joins. Their
+		// own seated flag is legitimate; it must never activate a nearby NPC.
+		bool flag = e.Bench && e.Owner.Vitals.AtBench && Inside(e, e.Owner)
+			&& (e.Busy || Time.unscaledTime - e.RequestedAt < 2f);
 		if (flag && !e.Busy)
 		{
 			e.Busy = true;
@@ -713,14 +823,39 @@ internal static class InteractionRouter
 		}
 		else if (!flag && e.Busy)
 		{
-			e.Busy = false;
-			if (active == e)
-			{
-				active = null;
-			}
-			e.NextAllowed = Time.unscaledTime + 0.2f;
-			Diagnostics.Write("INTERACTION end P" + (e.Owner.Index + 1));
+			End(e, "bench-released");
 		}
+	}
+
+	private static bool WaitingForRequest(Entry entry)
+	{
+		FsmState state = entry.Fsm.ActiveState;
+		if (state == null || state.Actions == null) return false;
+		string name = state.Name ?? "";
+		bool waiting = name.IndexOf("range", StringComparison.OrdinalIgnoreCase) >= 0
+			|| name.Equals("Idle", StringComparison.OrdinalIgnoreCase)
+			|| name.IndexOf("prompt", StringComparison.OrdinalIgnoreCase) >= 0
+			|| name.IndexOf("listen", StringComparison.OrdinalIgnoreCase) >= 0;
+		if (!waiting) return false;
+		foreach (var action in state.Actions)
+			if (action != null && action.Enabled && ((entry.Up && action is ListenForUp) || (entry.Down && action is ListenForDown))) return true;
+		return false;
+	}
+
+	private static void End(Entry entry, string reason)
+	{
+		bool busy = entry.Busy;
+		entry.Busy = false;
+		entry.ControlHero = null;
+		entry.ControlState = null;
+		entry.ReturnedFrame = -1;
+		if (active == entry) active = null;
+		if (!busy) return;
+		entry.RequestedAt = -100f;
+		entry.NextAllowed = Time.unscaledTime + 0.2f;
+		Diagnostics.Write("INTERACTION end " + (entry.Owner == null ? "none" : "P" + (entry.Owner.Index + 1))
+			+ " reason=" + reason + " fsm=" + (entry.Fsm == null ? "missing" : entry.Fsm.Name)
+			+ " state=" + (entry.Fsm == null || entry.Fsm.ActiveState == null ? "none" : entry.Fsm.ActiveState.Name));
 	}
 
 	internal static void RecoverChallenge(CoopSession s)
@@ -802,9 +937,8 @@ internal static class InteractionRouter
 		{
 			return null;
 		}
-		foreach (KeyValuePair<Fsm, Entry> entry2 in entries)
+		foreach (Entry value in ancestors.Matches(f.GameObject.transform))
 		{
-			Entry value = entry2.Value;
 			if (value != entry && (bool)value.Fsm.GameObject && f.GameObject.transform.IsChildOf(value.Fsm.GameObject.transform))
 			{
 				Refresh(value);
@@ -988,11 +1122,9 @@ internal static class InteractionRouter
 	internal static void CloseForTransition()
 	{
 		PlayerSlot playerSlot = ((active == null) ? null : active.Owner);
-		if (active != null)
-		{
-			active.Busy = false;
-		}
+		foreach (Entry entry in entries.Values) End(entry, "scene-transition");
 		active = null;
+		InteractionControlLifecycle.Source = null;
 		DialogueCleanup.Close();
 		if (playerSlot != null)
 		{
@@ -1059,7 +1191,10 @@ internal static class InteractionRouter
 
 	internal static void Reset()
 	{
+		InteractionControlLifecycle.Source = null;
+		textCache.Clear();
 		entries.Clear();
+		ancestors.Clear();
 		ignored.Clear();
 		subscribedContacts.Clear();
 		active = null;

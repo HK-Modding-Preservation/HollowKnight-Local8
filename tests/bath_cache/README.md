@@ -1,0 +1,3 @@
+# Bath discovery/cache regressions
+
+Run `python tests/bath_cache/run.py --dotnet YOUR_DOTNET`. This compiles the unchanged production `CoopBath` against controlled physics, native-callback and player-context doubles. Eight players refill independently, including reserve vessels; dead/pending actors do not refill. Checks cover destroyed baths, room resets, state-array replacement, in-place native callback registration and live refill-state delays. A room with 1,000 unrelated FSMs is classified once; warm scans perform no unrelated method-name action reads. These checks do not execute Unity's physics engine.

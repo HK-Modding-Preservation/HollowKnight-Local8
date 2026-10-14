@@ -13,6 +13,7 @@ internal sealed class RoleState {
  internal HeroController StatsHero;
  internal int AppliedMasks=-1;
  internal readonly RoleFocusCycle FocusCycle=new RoleFocusCycle();
+ internal readonly EquippedCharmCursor Equipped=new EquippedCharmCursor();
 }
 internal static class RoleSystem {
  internal static readonly RoleState[] States=new RoleState[8];
@@ -32,7 +33,7 @@ internal static class RoleSystem {
  internal static RoleState State(PlayerSlot p) {
   if(p==null||p.Index<0||p.Index>=States.Length)return null;
   RoleState x=States[p.Index];
-  if(x==null||x.Player!=p){EnsureSave();string id=Controls.IsKeyboard(p.Device)?"keyboard-slot:"+p.Index:Controls.Key(p.Device);int chosen;
+  if(x==null||x.Player!=p){EnsureSave();string id=!string.IsNullOrEmpty(p.ProfileId)?"profile:"+p.ProfileId:Controls.IsKeyboard(p.Device)?"keyboard-slot:"+p.Index:Controls.Key(p.Device);int chosen;
    chosen=selections.Role(id,RoleCatalog.Index(Local8Mod.Save.RoleIds[p.Index]));
    x=new RoleState{Player=p,Participant=id,Chosen=chosen,PendingJoin=selections.NeedsSelection(id,Local8Mod.Save.RoleIds[p.Index])};x.Cursor=x.Chosen;States[p.Index]=x;
    if(p.Index==3&&Controls.IsKeyboard(p.Device)&&p.Actions!=null)
@@ -45,8 +46,8 @@ internal static class RoleSystem {
  }
  static void EnsureSave(){if(Local8Mod.Save.RoleIds==null||Local8Mod.Save.RoleIds.Length!=8){var a=new string[8];if(Local8Mod.Save.RoleIds!=null)Array.Copy(Local8Mod.Save.RoleIds,a,Math.Min(8,Local8Mod.Save.RoleIds.Length));Local8Mod.Save.RoleIds=a;}}
  internal static void UnlockOvercharm(PlayerData data){if(data!=null&&!data.canOvercharm)data.canOvercharm=true;}
- internal static void Install(){if(installed)return;installed=true;KeypadInput.Install();RoleEffects.Install();PartySoul.Install();RumbleRouting.Install();BossMusicGuard.Install();SpellSafety.Install();JumpInputIsolation.Install();PvpArena.Install();Camera.onPreCull+=RoleUI.BeforeCamera;}
- internal static void Shutdown(){PvpArena.Shutdown();KeypadInput.Uninstall();ReleasePause();RoleUI.Release();JoinHint.Reset();SoulDisplay.Clear();PhysicsGuard.Reset();RoleEffects.Uninstall();PartySoul.Uninstall();RumbleRouting.Uninstall();BossMusicGuard.Uninstall();SpellSafety.Uninstall();JumpInputIsolation.Uninstall();CoopBath.Reset();Camera.onPreCull-=RoleUI.BeforeCamera;installed=false;Array.Clear(States,0,8);owner=null;Joining=null;selections.Clear();}
+ internal static void Install(){if(installed)return;installed=true;KeypadInput.Install();RoleEffects.Install();PartySoul.Install();RumbleRouting.Install();BossMusicGuard.Install();SpellSafety.Install();JumpInputIsolation.Install();PvpArena.Install();Camera.onPreCull+=RoleUI.BeforeCamera;CharmCatalogTint.Install();}
+ internal static void Shutdown(){CharmCatalogTint.Uninstall();PvpArena.Shutdown();KeypadInput.Uninstall();ReleasePause();RoleUI.Release();JoinHint.Reset();SoulDisplay.Clear();PhysicsGuard.Reset();RoleEffects.Uninstall();PartySoul.Uninstall();RumbleRouting.Uninstall();BossMusicGuard.Uninstall();SpellSafety.Uninstall();JumpInputIsolation.Uninstall();CoopBath.Reset();Camera.onPreCull-=RoleUI.BeforeCamera;installed=false;Array.Clear(States,0,8);owner=null;Joining=null;selections.Clear();}
  internal static void Reset(){PartySoul.Reset();JoinHint.Reset();RumbleRouting.StopAll();PhysicsGuard.Reset();BossMusicGuard.Reset();CoopBath.Reset();ReleasePause();Joining=null;releaseAt=0;RoleUI.RestoreVanilla();RoleEffects.ClearAuras();Array.Clear(States,0,8);owner=null;selections.Clear();}
  static void ReleasePause(){if(paused){paused=false;GameManager gm=GameManager.instance;if(gm==null||!gm.isPaused){if(Time.timeScale==0)Time.timeScale=oldScale>0?oldScale:1f;}}}
  static bool Ready(PlayerSlot p){return p!=null&&p.Connected&&p.Ready&&p.Alive&&!p.InputBlocked&&!p.ArenaTransfer&&!p.SpawnPending;}
@@ -54,7 +55,7 @@ internal static class RoleSystem {
   try {
    CoopSession s=runtime.Session;
    if(s!=owner){Reset();owner=s;}
-   JoinHint.Tick(runtime);CharmMenuExit.Tick();if(runtime.Enabled.Value){RespawnSlider.Normalize(runtime);if(s!=null&&s.Active&&s.Data!=null&&!s.Data.canOvercharm){s.Data.canOvercharm=true;Diagnostics.Write("CHARMS overcharm unlocked for coop");}PartySoul.Sync(s);PhysicsGuard.Tick(s);CoopBath.Tick(s);}
+   JoinHint.Tick(runtime);CharmMenuExit.Tick();if(runtime.Enabled.Value){RespawnSlider.Normalize(runtime);if(s!=null&&s.Active&&s.Data!=null&&!s.Data.canOvercharm){s.Data.canOvercharm=true;Diagnostics.Write("CHARMS overcharm unlocked for coop");}PartySoul.Sync(s);WorldContactRouting.Tick(s);PhysicsGuard.Tick(s);CoopBath.Tick(s);}
    if(!runtime.Enabled.Value||s==null||!s.Active||!s.Gameplay){ReleasePause();Joining=null;RoleAura.Hide();return;}
    GameManager gm=GameManager.instance;
    if(gm==null||gm.IsLoadingSceneTransition||!gm.HasFinishedEnteringScene){ReleasePause();Joining=null;RoleAura.Hide();return;}
@@ -103,20 +104,33 @@ internal static class RoleSystem {
   Diagnostics.Write("ROLE P"+(p.Index+1)+"="+RoleCatalog.All[index].Id);return true;
  }
  internal static int Maximum(int value,PlayerSlot p){return value+Definition(p).Masks;}
+ internal static void ApplyProfile(PlayerSlot p,string id){
+  EnsureSave();int index=RoleCatalog.Index(id);Local8Mod.Save.RoleIds[p.Index]=RoleCatalog.All[index].Id;
+  var state=State(p);state.Participant=!string.IsNullOrEmpty(p.ProfileId)?"profile:"+p.ProfileId:Controls.IsKeyboard(p.Device)?"keyboard-slot:"+p.Index:Controls.Key(p.Device);state.Chosen=state.Cursor=index;state.PendingJoin=false;
+  selections.Complete(state.Participant,index);Prime(state);
+  if(Joining==p){Joining=null;ReleasePause();}
+  RoleEffects.RefreshAura(p);
+ }
  internal static void NativeInput(CoopSession s){
-  if(!Charms.wasNative){Charms.wasNative=true;for(int i=0;i<8;i++){if(Charms.NativeCursor[i]<1||Charms.NativeCursor[i]>40)Charms.NativeCursor[i]=Charms.FirstOwned(s.Data);}
-   foreach(PlayerSlot p in s.Players){RoleState x=State(p);x.Cursor=x.Chosen;Prime(x);x.LastCharm=Charms.NativeCursor[p.Index];}}
+  if(!Charms.wasNative){Charms.wasNative=true;CharmExtensions.Discover();for(int i=0;i<8;i++){if(!CharmExtensions.Contains(Charms.NativeCursor[i])||!CharmExtensions.Owned(s.Data,Charms.NativeCursor[i]))Charms.NativeCursor[i]=Charms.FirstOwned(s.Data);}
+   foreach(PlayerSlot p in s.Players){RoleState x=State(p);x.Equipped.Clear();x.Cursor=x.Chosen;Prime(x);x.LastCharm=Charms.NativeCursor[p.Index];}}
   Charms.Freeze(s);
-  foreach(PlayerSlot p in s.Players){if(!p.Alive||!p.Ready||!p.Connected||p.Actions==null)continue;RoleState x=State(p);int d=Direction(p);
-   bool inRoles=Charms.NativeCursor[p.Index]>=100;
+  float scale=Mathf.Clamp(Screen.height/900f,.65f,1.6f),w=Screen.width/scale,h=Screen.height/scale;
+  for(int position=0;position<s.Players.Count;position++){PlayerSlot p=s.Players[position];if(!p.Alive||!p.Ready||!p.Connected||p.Actions==null)continue;RoleState x=State(p);int d=Direction(p);
+   int[] equipped=x.Equipped.Active?p.Charms.Ids():null;
+   if(x.Equipped.Active){if(x.Equipped.Sync(equipped))Charms.NativeCursor[p.Index]=x.Equipped.Selected;else Charms.NativeCursor[p.Index]=ReturnToCatalog(x,s.Data);}
+   bool inRoles=CharmExtensions.IsRole(Charms.NativeCursor[p.Index]);
    if(MoveDue(x,d)){
     LastMoved=p.Index;
-    if(inRoles){int next=RoleCatalog.VerticalNext(x.Cursor,d==-1?-1:d==1?1:0,d==2?1:d==3?-1:0);if(next<0){Charms.NativeCursor[p.Index]=x.LastCharm;inRoles=false;}else {x.Cursor=next;Charms.NativeCursor[p.Index]=100+next;}}
-    else {int old=Charms.NativeCursor[p.Index],next=Charms.Neighbor(old,d==-1?-1:d==1?1:0,d==2?1:d==3?-1:0,s.Data);if(d==1&&next==old){x.LastCharm=old;x.Cursor=x.Chosen;Charms.NativeCursor[p.Index]=100+x.Cursor;inRoles=true;}else {Charms.NativeCursor[p.Index]=next;x.LastCharm=next;}}
+    if(x.Equipped.Active){Rect card=CharmMenuLayout.Card(CharmMenuLayout.Cards(w,h,s.Players.Count),position,s.Players.Count);x.Equipped.Move(d,CharmMenuLayout.IconColumns(card),equipped);Charms.NativeCursor[p.Index]=x.Equipped.Active?x.Equipped.Selected:ReturnToCatalog(x,s.Data);}
+    else if(inRoles){int next=RoleCatalog.VerticalNext(x.Cursor,d==-1?-1:d==1?1:0,d==2?1:d==3?-1:0);if(next<0){Charms.NativeCursor[p.Index]=x.LastCharm;inRoles=false;}else {x.Cursor=next;Charms.NativeCursor[p.Index]=CharmExtensions.Role(next);}}
+    else {int old=Charms.NativeCursor[p.Index],next=Charms.Neighbor(old,d==-1?-1:d==1?1:0,d==2?1:d==3?-1:0,s.Data);if(d==2&&next==old&&x.Equipped.Enter(p.Charms.Ids(),old)){x.LastCharm=old;Charms.NativeCursor[p.Index]=x.Equipped.Selected;}else if(d==1&&next==old){x.LastCharm=old;x.Cursor=x.Chosen;Charms.NativeCursor[p.Index]=CharmExtensions.Role(x.Cursor);inRoles=true;}else {Charms.NativeCursor[p.Index]=next;x.LastCharm=next;}}
    }
-   bool submit=Submit(p);if(submit&&!x.SubmitHeld){if(inRoles)Choose(p,x.Cursor,false);else Charms.Toggle(p,Charms.NativeCursor[p.Index]);}
+   bool submit=Submit(p);if(submit&&!x.SubmitHeld){if(x.Equipped.Active){int id=x.Equipped.Selected;if(p.Charms.IsEquipped(id))Charms.Toggle(p,id);x.Equipped.Sync(p.Charms.Ids());Charms.NativeCursor[p.Index]=x.Equipped.Active?x.Equipped.Selected:ReturnToCatalog(x,s.Data);}else if(inRoles)Choose(p,x.Cursor,false);else Charms.Toggle(p,Charms.NativeCursor[p.Index]);}
    x.SubmitHeld=submit;
   }
  }
+ static int ReturnToCatalog(RoleState state,PlayerData data){int id=state.Equipped.ReturnCharm;return CharmExtensions.Contains(id)&&CharmExtensions.Owned(data,id)?id:Charms.FirstOwned(data);}
+ internal static void ClearNativeFocus(){foreach(var state in States)if(state!=null)state.Equipped.Clear();}
 }
 }

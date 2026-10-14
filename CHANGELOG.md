@@ -2,6 +2,20 @@
 
 Public changes to Hollow Knight 8-Player Co-op.
 
+## v0.11.0 - 2026-10-14
+
+- Add saved named player profiles and portable adventure statistics, with validated equipment/control loading and duplicate-identity protection.
+- Add spells-only duels with individual 1–99 SOUL/second regeneration and safer jump/fall/bench entry and return.
+- Redesign F8, profile controls, sliders and translated hover help; improve independent equipped-charm navigation, provider icons/descriptions, royal charm presentation and permanent Void Heart.
+- Expand optional custom-charm registration/navigation/equipment/save support and experimental Pale Court clone/Bloom/Boon handling.
+- Add automatic Normal/Balanced/Maximum performance presets for 1–2/3–4/5–8 players, manual customization, native particle/blur controls and original-setting restoration.
+- Reduce repeated context/reflection/hierarchy/PlayMaker searches and optional damage particles/audio; clean orphaned native jump effects.
+- Improve shared light presentation, healing/background compositing, cooperative acquisition effects and extra SOUL reserve bars.
+- Correct world ownership for mushroom bounces, metal recoil, steep slopes, shade-gate collision exemptions and crystal-dash destructibles. Preserve vertical-conveyor gravity and coherent party sensors/Walker targets.
+- Improve whole-party death authorization, enemy retargeting, familiar lifetime, native walking areas and crystal-dash cleanup/continuity.
+- Correct shared-roar recoil/gravity/drift and improve interaction closing ownership, charm-panel visibility, Escape/F8 and stale-control recovery.
+- Publish the complete alpha227-based source with 0.11.0/0.11.0.0 metadata, reproducible build instructions and validation limits.
+
 ## v0.10.0 - 2026-10-07
 
 - Added nine persistent role choices, including no role, independent role selection and bench/charm-menu changes. Refined healer ally healing, mage SOUL sharing, Shaman damage risk and per-player summon bonuses.
@@ -39,4 +53,4 @@ The v0.9.0 release candidate is based on internal build 139.
 
 ## Versioning
 
-Public tags use `v0.10.0`; Modding API/GetVersion uses `0.10.0`; assembly, file and ModLinks versions use `0.10.0.0`. Development alpha labels are separate from public-release metadata.
+Public tags use `v0.11.0`; Modding API/GetVersion uses `0.11.0`; assembly, file and ModLinks versions use `0.11.0.0`. Development alpha labels are separate from public-release metadata.

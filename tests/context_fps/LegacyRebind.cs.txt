@@ -1,0 +1,67 @@
+internal static void RebindObject(object obj, PlayerSlot p)
+	{
+		if (PvpFamiliars.Rebind(obj, p))
+		{
+			return;
+		}
+		ReferenceField[] array = GetReferenceAccesses(obj.GetType());
+		foreach (ReferenceField fieldInfo in array)
+		{
+			Type fieldType = fieldInfo.FieldType;
+			if (fieldType == typeof(HeroControllerStates))
+			{
+				fieldInfo.SetValue(obj, p.Hero.cState);
+				continue;
+			}
+			if (fieldType == typeof(PlayerData))
+			{
+				fieldInfo.SetValue(obj, Session.Data);
+				continue;
+			}
+			if (fieldType == typeof(HeroActions))
+			{
+				fieldInfo.SetValue(obj, p.Actions);
+				continue;
+			}
+			object value = fieldInfo.GetValue(obj);
+			if (value is HutongGames.PlayMaker.FsmGameObject fsmGameObject)
+			{
+				fsmGameObject.Value = Mapped(fsmGameObject.Value, p) as GameObject;
+				continue;
+			}
+			if (value is HutongGames.PlayMaker.FsmObject fsmObject)
+			{
+				fsmObject.Value = Mapped(fsmObject.Value, p);
+				continue;
+			}
+			if (value is HutongGames.PlayMaker.FsmOwnerDefault fsmOwnerDefault)
+			{
+				if (fsmOwnerDefault.GameObject != null)
+				{
+					fsmOwnerDefault.GameObject.Value = Mapped(fsmOwnerDefault.GameObject.Value, p) as GameObject;
+				}
+				continue;
+			}
+			if (value is HutongGames.PlayMaker.FsmEventTarget fsmEventTarget)
+			{
+				if (fsmEventTarget.gameObject != null && fsmEventTarget.gameObject.GameObject != null)
+				{
+					fsmEventTarget.gameObject.GameObject.Value = Mapped(fsmEventTarget.gameObject.GameObject.Value, p) as GameObject;
+				}
+				if ((bool)fsmEventTarget.fsmComponent)
+				{
+					fsmEventTarget.fsmComponent = Mapped(fsmEventTarget.fsmComponent, p) as PlayMakerFSM;
+				}
+				continue;
+			}
+			UnityEngine.Object @object = value as UnityEngine.Object;
+			if ((bool)@object)
+			{
+				UnityEngine.Object object2 = Mapped(@object, p);
+				if (object2 != @object && object2 != null && fieldType.IsInstanceOfType(object2))
+				{
+					fieldInfo.SetValue(obj, object2);
+				}
+			}
+		}
+	}

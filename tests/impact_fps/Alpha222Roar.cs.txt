@@ -1,0 +1,103 @@
+using UnityEngine;
+
+namespace KO.HollowKnight8;
+
+// The roar FSM can write gravity directly, without the HeroController's
+// prevGravityScale backup. Repair only a completed native roar release.
+internal static class Alpha222Roar
+{
+    private static bool installed;
+    private static readonly HeroController[] heroes = new HeroController[8];
+    private static readonly float[] gravity = new float[8];
+
+    internal static void Install()
+    {
+        if (installed) return;
+        installed = true;
+        On.HeroController.RelinquishControl += Relinquish;
+        On.HeroController.RegainControl += Regain;
+    }
+
+    internal static void Uninstall()
+    {
+        if (!installed) return;
+        installed = false;
+        On.HeroController.RelinquishControl -= Relinquish;
+        On.HeroController.RegainControl -= Regain;
+        Reset();
+    }
+
+    private static PlayerSlot Owner(HeroController hero)
+    {
+        var f = WorldRouting.Current;
+        var s = Plugin.Self ? Plugin.Self.Session : null;
+        if (!hero || s == null || !s.Active || f == null || f.Name != "Roar Lock") return null;
+        var p = s.Resolve(f);
+        return p != null && p.Hero == hero && p.Index >= 0 && p.Index < 8 ? p : null;
+    }
+
+    private static void Relinquish(On.HeroController.orig_RelinquishControl orig, HeroController hero)
+    {
+        var p = Owner(hero);
+        bool wasHeld = hero.controlReqlinquished;
+        float saved = 0;
+        if (p != null)
+        {
+            var body = hero.GetComponent<Rigidbody2D>();
+            saved = body ? body.gravityScale : 0;
+            if (saved <= .01f) saved = Reflect.Get(hero, "prevGravityScale", 0f);
+        }
+        orig(hero);
+        if (p == null) return;
+        // Repeated ROAR ENTER can re-run the native lock while its gravity is
+        // already zero. Do not replace the original positive backup with it.
+        if (wasHeld && heroes[p.Index] == hero) return;
+        heroes[p.Index] = hero;
+        gravity[p.Index] = saved > .01f ? saved : hero.DEFAULT_GRAVITY;
+        Log(p, "enter");
+    }
+
+    private static void Regain(On.HeroController.orig_RegainControl orig, HeroController hero)
+    {
+        var p = Owner(hero);
+        orig(hero);
+        if (p == null) return;
+        var gm = GameManager.instance;
+        var c = hero.cState;
+        var body = hero.GetComponent<Rigidbody2D>();
+        bool canRestore = p.Ready && p.Alive && !p.Down && !p.Hazard && !p.SpawnPending &&
+            !p.ArenaTransfer && !hero.controlReqlinquished && hero.acceptingInput &&
+            !c.dead && !c.transitioning && !c.recoilFrozen && !c.recoiling &&
+            !c.dashing && !c.superDashing && !c.casting && !c.swimming && !hero.inAcid &&
+            !p.AcidAssistActive && gm && !gm.IsLoadingSceneTransition &&
+            !EmergencyWarp.Active(p) && !ScriptedParty.Holds(p) && !CoopEnding.HoldsActor(p) &&
+            !ChallengeSequence.Holds(p) && !BenchSeats.Seated(p);
+        if (canRestore && body && body.simulated && !body.isKinematic && body.gravityScale <= .01f)
+        {
+            float value = heroes[p.Index] == hero && gravity[p.Index] > .01f ? gravity[p.Index] : hero.DEFAULT_GRAVITY;
+            if (value > .01f)
+            {
+                body.gravityScale = value;
+                Reflect.Set(hero, "prevGravityScale", value);
+                Diagnostics.Write("ROAR restored gravity P" + (p.Index + 1));
+            }
+        }
+        heroes[p.Index] = null; gravity[p.Index] = 0;
+        Log(p, "exit");
+    }
+
+    private static void Log(PlayerSlot p, string phase)
+    {
+        var h = p.Hero;
+        var body = h.GetComponent<Rigidbody2D>();
+        Diagnostics.Write("ROAR " + phase + " P" + (p.Index + 1) + " state=" + h.hero_state +
+            " control=" + h.controlReqlinquished + " recoil=" + h.cState.recoiling +
+            " frozen=" + h.cState.recoilFrozen + " gravity=" + (body ? body.gravityScale : -1) +
+            " velocity=" + (body ? body.velocity.ToString() : "none"));
+    }
+
+    internal static void Reset()
+    {
+        for (int i = 0; i < heroes.Length; i++) { heroes[i] = null; gravity[i] = 0; }
+    }
+}

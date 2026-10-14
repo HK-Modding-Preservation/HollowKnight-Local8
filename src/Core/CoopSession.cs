@@ -89,6 +89,7 @@ internal sealed class CoopSession : IDisposable
 				try
 				{
 					Hooks.RebindActor(s);
+					PaleCourtInterop.RepairClone(coopSession, s);
 					using (PlayerContext.Enter(s))
 					{
 						int health = coopSession.Data.health;
@@ -129,7 +130,7 @@ internal sealed class CoopSession : IDisposable
 					if (s.SpawnAsDown)
 					{
 						s.SpawnAsDown = false;
-						coopSession.Down(s, spawnShade: false);
+						TimedRespawnRecovery.RestoreDown(coopSession, s);
 					}
 					Diagnostics.Snapshot(coopSession, "spawn-ready-P" + (s.Index + 1));
 				}
@@ -159,6 +160,7 @@ internal sealed class CoopSession : IDisposable
 	}
 
 	internal readonly List<PlayerSlot> Players = new List<PlayerSlot>();
+	private readonly FramePlayers framePlayers = new FramePlayers();
 
 	internal PlayerSlot Cloning;
 
@@ -177,6 +179,8 @@ internal sealed class CoopSession : IDisposable
 	private readonly Dictionary<int, PlayerSlot> owners = new Dictionary<int, PlayerSlot>();
 
 	private readonly HashSet<int> noOwnerThisFrame = new HashSet<int>();
+
+	private readonly OwnerQueryCache ownerQueries = new OwnerQueryCache();
 
 	private int ownerFrame = -1;
 
@@ -203,10 +207,15 @@ internal sealed class CoopSession : IDisposable
 	private int performanceFrames;
 
 	private int slowFrames;
+	private int slowedTimeFrames;
 
 	private int gcCollections;
 
 	private int perfPlayers;
+
+	private int perfProfile;
+	private bool perfMode;
+	private bool perfSuspended;
 
 	private static readonly Collider2D[] safetyHits = new Collider2D[32];
 
@@ -301,7 +310,7 @@ internal sealed class CoopSession : IDisposable
 		get
 		{
 			GameManager instance = GameManager.instance;
-			if ((bool)instance && (bool)instance.hero_ctrl)
+			if (!TeamWipe && (bool)instance && (bool)instance.hero_ctrl)
 			{
 				return CoopRules.CanQueueJoin(instance.IsGameplayScene(), instance.IsLoadingSceneTransition, instance.HasFinishedEnteringScene, instance.gameState == GameState.PLAYING, instance.isPaused || instance.gameState == GameState.PAUSED);
 			}
@@ -359,6 +368,7 @@ internal sealed class CoopSession : IDisposable
 				Data = gm.playerData;
 				Primary.Capture(Data);
 				owners.Clear();
+				ownerQueries.Clear();
 				RegisterHierarchy(Primary);
 				if (Primary.Down && !TeamWipe && !EntryProxy)
 				{
@@ -493,23 +503,41 @@ internal sealed class CoopSession : IDisposable
 			ArenaGather.Tick(this);
 			if (flag2 || plugin.Panel)
 			{
+				if (!perfSuspended)
+				{
+					perfSuspended = true;
+					Diagnostics.Write("PERF WINDOW suspended state=" + gm.gameState + " paused=" + gm.isPaused + " panel=" + plugin.Panel);
+				}
 				performanceStart = 0f;
 				performanceFrames = (slowFrames = 0);
+				slowedTimeFrames = 0;
+				ImpactMetrics.ResetWindow();
 				worstFrame = 0f;
 				return;
 			}
+			if (perfSuspended)
+			{
+				perfSuspended = false;
+				Diagnostics.Write("PERF WINDOW resumed state=" + gm.gameState + " paused=" + gm.isPaused + " panel=" + plugin.Panel);
+			}
 			if (Players.Count > 1)
 			{
-				if (performanceStart <= 0f || perfPlayers != Players.Count)
+				int profile = PerformancePresets.Signature(plugin);
+				if (performanceStart <= 0f || perfPlayers != Players.Count || perfMode != plugin.PerformanceMode.Value || perfProfile != profile)
 				{
 					performanceStart = Time.unscaledTime;
 					nextPerformanceLog = performanceStart + 15f;
 					performanceFrames = (slowFrames = 0);
+					slowedTimeFrames = 0;
+					ImpactMetrics.ResetWindow();
 					worstFrame = 0f;
 					gcCollections = GC.CollectionCount(0);
 					perfPlayers = Players.Count;
+					perfMode = plugin.PerformanceMode.Value;
+					perfProfile = profile;
 				}
 				performanceFrames++;
+				if (Time.timeScale < 0.9f) slowedTimeFrames++;
 				worstFrame = Mathf.Max(worstFrame, Time.unscaledDeltaTime);
 				if (Time.unscaledDeltaTime > 0.05f)
 				{
@@ -518,8 +546,9 @@ internal sealed class CoopSession : IDisposable
 				if (Time.unscaledTime >= nextPerformanceLog)
 				{
 					float num = Mathf.Max(0.1f, Time.unscaledTime - performanceStart);
-					Diagnostics.Write("PERF players=" + Players.Count + " fps_avg=" + Mathf.RoundToInt((float)performanceFrames / num) + " worst_ms=" + Mathf.RoundToInt(worstFrame * 1000f) + " frames_over_50ms=" + slowFrames + " gc0=" + (GC.CollectionCount(0) - gcCollections) + " scene=" + UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+					Diagnostics.Write("PERF players=" + Players.Count + " mode=" + (perfMode ? "reduced" : "full") + " fps_avg=" + Mathf.RoundToInt((float)performanceFrames / num) + " worst_ms=" + Mathf.RoundToInt(worstFrame * 1000f) + " frames_over_50ms=" + slowFrames + " gc0=" + (GC.CollectionCount(0) - gcCollections) + " frames_time_slowed=" + slowedTimeFrames + " reduce_hit_effects=" + plugin.ReduceHitEffects.Value + " " + PerformancePresets.Report(plugin) + " " + ImpactMetrics.Report() + " " + InteractionRouter.RoutingPerformance + " " + NativeEventSearch.Performance + " scene=" + UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
 					performanceFrames = (slowFrames = 0);
+					slowedTimeFrames = 0;
 					worstFrame = 0f;
 					gcCollections = GC.CollectionCount(0);
 					performanceStart = Time.unscaledTime;
@@ -533,12 +562,12 @@ internal sealed class CoopSession : IDisposable
 			InteractionRouter.ObserveBenches();
 			BenchSeats.Tick(this);
 			WorldRouting.Tick(this);
-			PlayerSlot[] array = Players.ToArray();
+			PlayerSlot[] array = framePlayers.Snapshot(Players);
 			foreach (PlayerSlot p2 in array)
 			{
 				try
 				{
-					if (p2.Index > 0 && !p2.Ready && !p2.SpawnPending && !p2.Faulted && Time.unscaledTime >= Mathf.Max(Mathf.Max(readyAt, p2.RetryAt), p2.JoinDelayAt) && (bool)Primary.Hero && !Primary.Hazard && !Primary.Hero.cState.transitioning)
+					if (p2.Index > 0 && !p2.Ready && !p2.SpawnPending && !p2.Faulted && Time.unscaledTime >= Mathf.Max(Mathf.Max(readyAt, p2.RetryAt), p2.JoinDelayAt) && (bool)Primary.Hero && !Primary.Hazard && !Primary.Hero.cState.transitioning && framePlayers.TryStartActor())
 					{
 						if ((bool)p2.Hero)
 						{
@@ -563,13 +592,13 @@ internal sealed class CoopSession : IDisposable
 						p2.NextCharmUpdate = Time.unscaledTime + 0.5f;
 						Charms.UpdateMaximum(p2, Data, heal: false);
 					}
-					if (p2.Hazard && Time.time >= p2.HazardUntil)
+					if (p2.Hazard && !p2.Down && Time.time >= p2.HazardUntil)
 					{
 						Recover(p2, respawn: false);
 					}
-					if (p2.Down && !PvpMatch.Running && plugin.TimedRespawn.Value && Time.time - p2.DownAt >= plugin.RespawnSeconds.Value && Players.Any((PlayerSlot q) => q != p2 && q.Alive))
+					if (p2.Down)
 					{
-						Recover(p2, respawn: true);
+						TimedRespawnRecovery.Tick(this, p2, plugin.TimedRespawn.Value, plugin.RespawnSeconds.Value);
 					}
 					if (!p2.Alive)
 					{
@@ -610,14 +639,16 @@ internal sealed class CoopSession : IDisposable
 						p2.ProtectionUntil = 0f;
 						p2.Hero.cState.invulnerable = false;
 					}
-					if (Time.unscaledTime - p2.LastDamageAt > 4f && p2.ProtectionUntil <= 0f && !p2.Vitals.Invincible && !p2.Hero.cState.shadowDashing && !p2.Hero.cState.transitioning)
+					if (Time.unscaledTime - p2.LastDamageAt > 4f && p2.ProtectionUntil <= 0f && !p2.Vitals.Invincible && !p2.Hero.cState.shadowDashing && !p2.Hero.cState.transitioning && !p2.Hero.cState.recoilFrozen && !p2.Hero.controlReqlinquished && !gm.TimeSlowed)
 					{
 						InvulnerablePulse component = p2.Hero.GetComponent<InvulnerablePulse>();
 						if ((bool)component && Reflect.Get(component, "pulsing", fallback: false))
 						{
 							component.stopInvulnerablePulse();
 							p2.Hero.cState.invulnerable = false;
-							p2.Hero.cState.recoiling = false;
+							// The native recoil exit also restores gravity. Clearing its
+							// flag here stranded the body in weightless backward motion.
+							// Keep that exit running; stale recoil has its own guarded repair.
 							Diagnostics.Write("DAMAGE pulse reset P" + (p2.Index + 1));
 						}
 					}
@@ -638,15 +669,15 @@ internal sealed class CoopSession : IDisposable
 			{
 				return;
 			}
-			PlayerSlot[] array2 = Players.Where((PlayerSlot p) => p.Alive).ToArray();
+			PlayerSlot[] array2 = framePlayers.Living(Players);
 			if (array2.Length == 0 && Players.All((PlayerSlot p) => p.Down))
 			{
 				Wipe();
-				return;
+				if (TeamWipe) return;
 			}
 			if (!CoopEnding.Active)
 			{
-				TickRevive(array2.Where((PlayerSlot p) => !EmergencyWarp.Active(p)).ToArray());
+				TickRevive(framePlayers.Revivable(array2));
 			}
 			EmergencyWarp.Tick(this, array2);
 			NativeDreamFx.ObserveTeleports(this);
@@ -753,7 +784,7 @@ internal sealed class CoopSession : IDisposable
 	private void CheckStuckControl(PlayerSlot p)
 	{
 		UIManager instance = UIManager.instance;
-		if (!Gameplay || !p.Alive || !p.Connected || p.Actions == null || p.InputBlocked || p.Hero.cState.transitioning || p.Hero.IsDreamReturning || DreamSequence.InStoryDream || ScriptedParty.Active || CoopEnding.Active || PvpMatch.Running || EmergencyWarp.Active(p) || TransitionVote.Holding(p) || BenchSeats.Seated(p) || PickupCard.Owner != null || InteractionRouter.ActivePlayer != null || Charms.NativeMenuOpen || ShopMenuRouting.MenuVisible || StagMenuRouting.HasOwner || !instance || instance.uiState != UIState.PLAYING || Mathf.Abs(p.Actions.moveVector.X) < 0.35f)
+		if (!Gameplay || !p.Alive || !p.Connected || p.Actions == null || p.InputBlocked || p.Hero.cState.transitioning || p.Hero.IsDreamReturning || DreamSequence.InStoryDream || ScriptedParty.Active || CoopEnding.Active || PvpMatch.Running || EmergencyWarp.Active(p) || TransitionVote.Holding(p) || BenchSeats.Seated(p) || PickupCard.Owner == p || InteractionRouter.Holds(p) || Charms.NativeMenuOpen || ShopMenuRouting.MenuVisible && ShopMenuRouting.Buyer == p || StagMenuRouting.HasOwner || !instance || instance.uiState != UIState.PLAYING || Mathf.Abs(p.Actions.moveVector.X) < 0.35f)
 		{
 			stuckSince.Remove(p);
 			stuckPosition.Remove(p);
@@ -1015,6 +1046,7 @@ internal sealed class CoopSession : IDisposable
 
 	internal void RegisterHierarchy(PlayerSlot p)
 	{
+		ownerQueries.Clear();
 		Component[] componentsInChildren = p.Hero.GetComponentsInChildren<Component>(includeInactive: true);
 		foreach (Component component in componentsInChildren)
 		{
@@ -1029,6 +1061,7 @@ internal sealed class CoopSession : IDisposable
 
 	internal void RefreshOwnership(GameObject root, PlayerSlot player)
 	{
+		ownerQueries.Clear();
 		Component[] componentsInChildren = root.GetComponentsInChildren<Component>(includeInactive: true);
 		foreach (Component component in componentsInChildren)
 		{
@@ -1053,6 +1086,31 @@ internal sealed class CoopSession : IDisposable
 	}
 
 	internal PlayerSlot Resolve(object obj)
+	{
+		if (obj is Fsm f) obj = f.Owner;
+		if (obj is FsmStateAction action) obj = action.Fsm.Owner;
+		// Awake/OnEnable during cloning can establish ownership as a side effect.
+		// Do not retain a negative answer from before that initialization.
+		if (Cloning != null) { ownerQueries.Clear(); return ResolveUncached(obj); }
+		UnityEngine.Object source = obj as UnityEngine.Object;
+		if (!source) return ResolveUncached(obj);
+		PlayerSlot result;
+		if (ownerQueries.TryGet(source, Time.frameCount, out result)) return result;
+		result = ResolveUncached(obj);
+		if (result != null) ownerQueries.Store(source, result);
+		else
+		{
+			// Preserve the original resolver's negative-cache policy. A hero whose
+			// slot is not assigned yet must be discoverable later in this frame.
+			Component component = obj as Component;
+			if (obj is GameObject go) component = go.transform;
+			if (component && noOwnerThisFrame.Contains(component.GetInstanceID()))
+				ownerQueries.Store(source, null);
+		}
+		return result;
+	}
+
+	private PlayerSlot ResolveUncached(object obj)
 	{
 		if (obj == null)
 		{
@@ -1164,9 +1222,15 @@ internal sealed class CoopSession : IDisposable
 			s.Vitals.Health = Math.Max(1, (s.CurrentMaxHealth + 1) / 2);
 		}
 		Cloning = s;
+		var spawnMetrics = new SpawnMetrics(s, false);
 		try
 		{
-			GameObject gameObject2 = UnityEngine.Object.Instantiate(gameObject, JoinDestination(), gameObject.transform.rotation);
+			PaleCourtInterop.Prepare();
+			spawnMetrics.Mark("interop_prepare");
+			GameObject gameObject2;
+			using (NativeParticleCopy.Begin(gameObject))
+				gameObject2 = UnityEngine.Object.Instantiate(gameObject, JoinDestination(), gameObject.transform.rotation);
+			spawnMetrics.Mark("instantiate");
 			s.Hero = gameObject2.GetComponent<HeroController>();
 			gameObject2.name = "Knight P" + (s.Index + 1);
 			PlayerLighting.Sync(Primary, s);
@@ -1216,7 +1280,11 @@ internal sealed class CoopSession : IDisposable
 				componentsInChildren[i].Player = s;
 			}
 			RegisterHierarchy(s);
+			spawnMetrics.Mark("register");
 			Hooks.RebindActor(s);
+			spawnMetrics.Mark("rebind");
+			PaleCourtInterop.RepairClone(this, s);
+			spawnMetrics.Mark("interop_repair");
 			PlayerLighting.Sync(Primary, s);
 			s.Colliders = gameObject2.GetComponentsInChildren<Collider2D>(includeInactive: true);
 			s.Renderers = gameObject2.GetComponentsInChildren<Renderer>(includeInactive: true);
@@ -1227,9 +1295,9 @@ internal sealed class CoopSession : IDisposable
 					continue;
 				}
 				Collider2D[] colliders = s.Colliders;
+				Collider2D[] componentsInChildren2 = player.Hero.GetComponentsInChildren<Collider2D>(includeInactive: true);
 				foreach (Collider2D collider2D in colliders)
 				{
-					Collider2D[] componentsInChildren2 = player.Hero.GetComponentsInChildren<Collider2D>(includeInactive: true);
 					foreach (Collider2D collider2D2 in componentsInChildren2)
 					{
 						if ((bool)collider2D && (bool)collider2D2)
@@ -1240,6 +1308,7 @@ internal sealed class CoopSession : IDisposable
 				}
 			}
 			AcidSwimming.PrepareCollisions(s, Data.hasAcidArmour);
+			spawnMetrics.Mark("collisions");
 			PlayMakerFSM[] componentsInChildren3 = gameObject2.GetComponentsInChildren<PlayMakerFSM>(includeInactive: true);
 			foreach (PlayMakerFSM playMakerFSM in componentsInChildren3)
 			{
@@ -1258,6 +1327,7 @@ internal sealed class CoopSession : IDisposable
 				}
 			}
 			plugin.StartCoroutine(FinishSpawn(s, sceneEpoch));
+			spawnMetrics.Mark("finish_start");
 		}
 		catch
 		{
@@ -1276,6 +1346,7 @@ internal sealed class CoopSession : IDisposable
 				s.Vitals.Health = 0;
 			}
 			Cloning = null;
+			spawnMetrics.Dispose();
 		}
 	}
 
@@ -1308,6 +1379,7 @@ internal sealed class CoopSession : IDisposable
 		{
 			p.Vitals.Health = Math.Max(1, (p.CurrentMaxHealth + 1) / 2);
 		}
+		var spawnMetrics = new SpawnMetrics(p, true);
 		try
 		{
 			p.Hero.transform.position = JoinDestination();
@@ -1315,10 +1387,13 @@ internal sealed class CoopSession : IDisposable
 			{
 				p.Hero.gameObject.SetActive(value: true);
 			}
+			spawnMetrics.Mark("activate");
 			PlayerLighting.Sync(Primary, p);
 			RegisterHierarchy(p);
 			Hooks.RebindActor(p);
+			spawnMetrics.Mark("rebind");
 			plugin.StartCoroutine(FinishSpawn(p, sceneEpoch));
+			spawnMetrics.Mark("finish_start");
 			Diagnostics.Write("REUSE P" + (p.Index + 1) + " scene=" + scene);
 		}
 		catch
@@ -1332,6 +1407,7 @@ internal sealed class CoopSession : IDisposable
 			{
 				p.Vitals.Health = 0;
 			}
+			spawnMetrics.Dispose();
 		}
 	}
 
@@ -1448,6 +1524,8 @@ internal sealed class CoopSession : IDisposable
 
 	internal void SceneChanged()
 	{
+		PlayerProfiles.Capture(this);
+		AdventureStats.ClearRoom();
 		TransitionVote.Reset();
 		DreamSequence.Reset();
 		CameraFadeRecovery.Reset();
@@ -1523,6 +1601,7 @@ internal sealed class CoopSession : IDisposable
 			}
 		}
 		owners.Clear();
+		ownerQueries.Clear();
 		if ((bool)Primary.Hero)
 		{
 			RegisterHierarchy(Primary);
@@ -1698,7 +1777,10 @@ internal sealed class CoopSession : IDisposable
 		BenchSeats.Leave(p);
 		Revival.End(p);
 		p.Down = true;
+		AdventureStats.Down(p);
 		p.DownAt = Time.time;
+		p.NextTimedRespawnAttempt = 0f;
+		p.Hazard = false;
 		p.Vitals.Health = 0;
 		p.Vitals.Blue = 0;
 		Commit(p);
@@ -2031,6 +2113,7 @@ internal sealed class CoopSession : IDisposable
 
 	private void Wipe()
 	{
+		if (!PartyDeath.TryBegin(this)) return;
 		TeamWipe = true;
 		CoopShades.Reset();
 		plugin.Notice("Equipo derrotado. Regresando al punto de reaparicion del juego.");
@@ -2407,6 +2490,9 @@ internal sealed class CoopSession : IDisposable
 
 	public void Dispose()
 	{
+		PlayerProfiles.Flush(this);
+		PlayerProfilesUI.Reset();
+		AdventureStats.ClearRoom();
 		PvpCharms.End();
 		RoleSystem.Reset();
 		SummonRouting.Reset();
@@ -2460,6 +2546,7 @@ internal sealed class CoopSession : IDisposable
 		}
 		Players.Clear();
 		owners.Clear();
+		ownerQueries.Clear();
 		Active = false;
 		TeamWipe = false;
 		suspended = false;

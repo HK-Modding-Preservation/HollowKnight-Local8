@@ -20,6 +20,8 @@ internal static class WorldRouting
 		internal PlayerSlot Player;
 
 		internal Vector3 Position;
+
+		internal int RoarScope;
 	}
 
 	private static readonly Dictionary<Fsm, Contact> contacts = new Dictionary<Fsm, Contact>();
@@ -56,6 +58,7 @@ internal static class WorldRouting
 		{
 			return ShadeCloakRitual.Contact(playerSlot, f, exit);
 		}
+		SharedAcquisition.Contact(f, playerSlot, exit);
 		if (!contacts.TryGetValue(f, out var value))
 		{
 			if (exit)
@@ -203,6 +206,9 @@ internal static class WorldRouting
 		call.Previous = Current;
 		call.Player = playerSlot;
 		call.Position = ((playerSlot != null && (bool)playerSlot.Hero) ? playerSlot.Hero.transform.position : Vector3.zero);
+		// Roar actions may nest another FSM before returning to this one.
+		// Track only root Roar Lock callbacks so cleanup waits for all actions.
+		if (f != null && f.Name == "Roar Lock") call.RoarScope = RoarMotionRecovery.BeforeFsm(f, playerSlot);
 		Call result = call;
 		Current = f;
 		return result;
@@ -211,25 +217,32 @@ internal static class WorldRouting
 	internal static void End(Fsm f, Call before)
 	{
 		Current = before.Previous;
+		if (before.RoarScope != 0 || RoarMotionRecovery.Active) RoarMotionRecovery.AfterFsm(f, before.Player, before.RoarScope);
 		CoopSession coopSession = ((Plugin.Self == null) ? null : Plugin.Self.Session);
 		PlayerSlot player = before.Player;
-		GameManager instance = GameManager.instance;
-		if (coopSession == null || !coopSession.Active || player == null || !player.Ready || !player.Alive || !instance || !instance.IsGameplayScene() || instance.IsLoadingSceneTransition || !instance.HasFinishedEnteringScene || player.ArenaTransfer || ArenaGather.TransferActive || EmergencyWarp.Active(player) || CoopEnding.Active || ScriptedParty.Active || BenchSeats.Seated(player))
+		if (coopSession == null || !coopSession.Active || player == null || !player.Ready || !player.Alive)
 		{
 			return;
 		}
 		Vector3 position = player.Hero.transform.position;
-		if (!(position.y < -100f))
+		if (position.y < -100f) return;
+		float num = Vector2.Distance(before.Position, position);
+		// Global broadcasts visit thousands of FSMs which have not moved this
+		// actor. Read live positions first; only a possible warp needs world/UI
+		// eligibility checks. No frame cache or skipped FSM events/actions.
+		if (num < 6f) return;
+		GameManager instance = GameManager.instance;
+		if (!instance || !instance.IsGameplayScene() || instance.IsLoadingSceneTransition || !instance.HasFinishedEnteringScene || player.ArenaTransfer || ArenaGather.TransferActive || EmergencyWarp.Active(player) || CoopEnding.Active || ScriptedParty.Active || BenchSeats.Seated(player))
 		{
-			float num = Vector2.Distance(before.Position, position);
-			bool flag = player.Hero.controlReqlinquished && num > 8f;
-			if (!(num < 6f) && (!coopSession.InRoom(position) || flag) && (!InteractionRouter.IsInteraction(f) || flag))
-			{
-				NativeDreamFx.TeleportTrail(player, before.Position, position);
-				warp = player;
-				warpAt = position;
-				warpTime = Time.unscaledTime;
-			}
+			return;
+		}
+		bool flag = player.Hero.controlReqlinquished && num > 8f;
+		if ((!coopSession.InRoom(position) || flag) && (!InteractionRouter.IsInteraction(f) || flag))
+		{
+			NativeDreamFx.TeleportTrail(player, before.Position, position);
+			warp = player;
+			warpAt = position;
+			warpTime = Time.unscaledTime;
 		}
 	}
 
@@ -249,7 +262,7 @@ internal static class WorldRouting
 				continue;
 			}
 			Vector3 position = player.Hero.transform.position;
-			if (sampled[index] && (bool)instance && instance.IsGameplayScene() && !instance.IsLoadingSceneTransition && instance.HasFinishedEnteringScene && !ScriptedParty.Active && !ArenaGather.TransferActive && !EmergencyWarp.Active(player) && !BenchSeats.Seated(player) && !player.ArenaTransfer && !player.Hero.cState.transitioning && player.Hero.controlReqlinquished && position.y >= -100f && Vector2.Distance(previous[index], position) > 12f)
+			if (sampled[index] && (bool)instance && instance.IsGameplayScene() && !instance.IsLoadingSceneTransition && instance.HasFinishedEnteringScene && (!ScriptedParty.Active || ScriptedParty.TracksChamber) && !ArenaGather.TransferActive && !EmergencyWarp.Active(player) && !BenchSeats.Seated(player) && !player.ArenaTransfer && !player.Hero.cState.transitioning && player.Hero.controlReqlinquished && position.y >= -100f && Vector2.Distance(previous[index], position) > 12f)
 			{
 				NativeDreamFx.TeleportTrail(player, previous[index], position);
 				warp = player;

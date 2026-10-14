@@ -1,0 +1,20 @@
+internal static void BeforeEvent(Fsm f, FsmEvent evt, FsmEventData eventData)
+    {
+        if (Replaying || !WorldSource(f) || evt == null) return;
+        try
+        {
+            var kind = Kind(f); if (kind == null || f.ActiveState?.Transitions == null) return;
+            foreach (var transition in f.ActiveState.Transitions)
+            {
+                if (transition == null || transition.EventName != evt.Name) continue;
+                FsmState target = null;
+                if (f.States != null) foreach (var state in f.States) if (state != null && state.Name == transition.ToState) { target = state; break; }
+                if (!Starts(target, kind)) return;
+                var s = Current;
+                var p = eventData?.SentByFsm != null ? s?.Resolve(eventData.SentByFsm) : null;
+                p = Valid(p) ? p : Route(PlayerContext.Current, f) ?? Collector(f, kind.Key);
+                Early(f, p, kind, true); return;
+            }
+        }
+        catch (Exception e) { Diagnostics.Throttled("ACQUISITION accepted event", e); }
+    }

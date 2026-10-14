@@ -63,7 +63,7 @@ internal sealed class RoleAura {
  }
  void Draw(PlayerSlot p,bool active){float dt=Mathf.Min(Time.unscaledDeltaTime,.05f);visible=Mathf.MoveTowards(visible,active?1f:0f,dt*7f);
   Root.transform.position=Feet(p);dome.enabled=visible>0f;float flash=Time.time<pulseUntil?.17f:0f;dome.color=new Color(1,1,1,visible*(.34f+flash+.035f*Mathf.Sin(Time.time*3)));
-  if(!active){emit=0;return;}MakeParticles();emit+=Time.deltaTime*22f;int count=Mathf.FloorToInt(emit);emit-=count;Emit(Mathf.Min(count,4));
+  if(!active){emit=0;return;}MakeParticles();emit+=Time.deltaTime*PerformanceTuning.CosmeticRate(22f);int count=Mathf.FloorToInt(emit);emit-=count;Emit(Mathf.Min(count,4));
  }
  internal static void Tick(CoopSession s){
   foreach(var kv in all)if(!kv.Key||!kv.Value.Root||!s.Players.Exists(p=>p.Hero==kv.Key))expired.Add(kv.Key);
