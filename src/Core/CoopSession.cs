@@ -394,8 +394,7 @@ internal sealed class CoopSession : IDisposable
 				};
 				playerSlot.Capture(Data);
 				originalActions = gm.inputHandler.inputActions;
-				InputDevice inputDevice = Controls.Find(plugin.PrimaryDevice.Value);
-				Controls.InitPrimary(playerSlot, originalActions, inputDevice ?? InputDevice.Null);
+				InitializePrimaryInput(playerSlot);
 				Players.Add(playerSlot);
 				RegisterHierarchy(playerSlot);
 				Hooks.PatchActor(playerSlot.Hero.gameObject);
@@ -443,23 +442,10 @@ internal sealed class CoopSession : IDisposable
 				BenchRest(playerSlot2.Hero);
 			}
 			benchWasActive = flag;
-			foreach (PlayerSlot player2 in Players)
-			{
-				if (player2.Device == null || (player2.Device != InputDevice.Null && !player2.Device.IsAttached))
-				{
-					InputDevice inputDevice2 = Controls.Find(player2.DeviceKey);
-					if (inputDevice2 != null)
-					{
-						Controls.Bind(player2, inputDevice2);
-					}
-				}
-			}
+			ReconnectControllers();
 			foreach (InputDevice d in Controls.Devices())
 			{
-				if (!plugin.Panel && Controls.JoinPressed(d) && !Players.Any((PlayerSlot p) => p.Device == d) && CanJoin)
-				{
-					Join(d);
-				}
+				HandleControllerJoin(d);
 			}
 			if (!Active)
 			{
@@ -932,11 +918,56 @@ internal sealed class CoopSession : IDisposable
 		}
 	}
 
-	internal void AssignPrimary(InputDevice device)
+	private void InitializePrimaryInput(PlayerSlot player)
 	{
-		if (Primary == null || (device != InputDevice.Null && (device == null || Players.Skip(1).Any((PlayerSlot p) => p.Device == device))))
+		InputDevice device = PrimaryController.Resolve(plugin.PrimaryDevice.Value, Controls.Devices(), InputManager.ActiveDevice);
+		Controls.InitPrimary(player, originalActions, device ?? InputDevice.Null);
+		// A missing saved pad may temporarily use keyboard, but keeps its key
+		// so reconnecting restores the right pad and its controller bindings.
+		if (device == null) player.DeviceKey = plugin.PrimaryDevice.Value;
+		else if (plugin.PrimaryDevice.Value != PrimaryController.Automatic && plugin.PrimaryDevice.Value != "Keyboard")
+			plugin.PrimaryDevice.Value = player.DeviceKey;
+	}
+
+	private void ReconnectControllers()
+	{
+		foreach (PlayerSlot player in Players)
 		{
-			return;
+			if (player.Device != null && (player.Device == InputDevice.Null || player.Device.IsAttached) &&
+				!(player == Primary && Controls.IsKeyboard(player.Device) && player.DeviceKey != "Keyboard")) continue;
+			InputDevice device = Controls.Find(player.DeviceKey);
+			if (device == null || Players.Any(p => p != player && p.Device == device)) continue;
+			if (player == Primary)
+			{
+				HeroActions previousActions = player.Actions;
+				Controls.RebindPrimary(player, originalActions, device);
+				if (plugin.PrimaryDevice.Value != PrimaryController.Automatic && plugin.PrimaryDevice.Value != "Keyboard")
+					plugin.PrimaryDevice.Value = player.DeviceKey;
+				GameManager gm = GameManager.instance;
+				if (gm && gm.inputHandler && gm.inputHandler.inputActions == previousActions) gm.inputHandler.inputActions = player.Actions;
+			}
+			else Controls.Bind(player, device);
+		}
+	}
+
+	private void HandleControllerJoin(InputDevice device)
+	{
+		if (Primary == null || plugin.Panel || !Controls.JoinPressed(device) || Players.Any(p => p.Device == device) || !CanJoin) return;
+		if (PrimaryController.ClaimFirstJoin(plugin.PrimaryDevice.Value, Players.Count, Primary.Device)) AssignPrimary(device, false);
+		else Join(device);
+	}
+
+	internal void AssignPrimaryAutomatic()
+	{
+		InputDevice device = PrimaryController.Resolve(PrimaryController.Automatic, Controls.Devices(), InputManager.ActiveDevice);
+		if (AssignPrimary(device, false)) plugin.PrimaryDevice.Value = PrimaryController.Automatic;
+	}
+
+	internal bool AssignPrimary(InputDevice device, bool remember = true)
+	{
+		if (Primary == null || device == null || (device != InputDevice.Null && (!device.IsAttached || device.Passive)))
+		{
+			return false;
 		}
 		if (device == InputDevice.Null)
 		{
@@ -971,10 +1002,19 @@ internal sealed class CoopSession : IDisposable
 			}
 			if (num >= 4)
 			{
-				return;
+				return false;
 			}
 		}
+		PlayerSlot displaced = device == InputDevice.Null ? null : Players.Skip(1).FirstOrDefault(p => p.Device == device);
+		InputDevice previousDevice = Primary.Device ?? InputDevice.Null;
+		HeroActions previousActions = Primary.Actions;
 		Controls.RebindPrimary(Primary, originalActions, device);
+		if (displaced != null)
+		{
+			// Exchange controls, never players, profiles, health or progression.
+			Controls.Dispose(displaced);
+			Controls.InitSecondary(displaced, originalActions, previousDevice);
+		}
 		if (Players.Count > 1 && Controls.IsKeyboard(Players[1].Device))
 		{
 			Controls.Dispose(Players[1]);
@@ -1010,8 +1050,11 @@ internal sealed class CoopSession : IDisposable
 			Controls.Dispose(Players[7]);
 			Controls.InitSecondary(Players[7], originalActions, InputDevice.Null);
 		}
-		plugin.PrimaryDevice.Value = Primary.DeviceKey;
+		if (remember) plugin.PrimaryDevice.Value = Primary.DeviceKey;
+		GameManager gm = GameManager.instance;
+		if (gm && gm.inputHandler && gm.inputHandler.inputActions == previousActions) gm.inputHandler.inputActions = Primary.Actions;
 		plugin.Notice("P1: " + Primary.DeviceName);
+		return true;
 	}
 
 	internal void RemoveLast()

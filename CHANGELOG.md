@@ -2,6 +2,17 @@
 
 Public changes to Hollow Knight 8-Player Co-op.
 
+## v0.11.1 - 2026-10-19
+
+- Default P1 to Automatic controller selection instead of forcing keyboard. Prefer the active/first attached controller and allow 2–8 controller-only players.
+- Migrate the old keyboard default once while retaining explicit saved controller identities; new manual Keyboard choices remain persistent.
+- Promote P1 controls to the top of F8 and explain Automatic/Keyboard/Assign P1 in all ten languages, including compact controller rows.
+- Assign an occupied controller to P1 by swapping control devices without moving characters, health or profiles; preserve saved extra-keyboard bindings.
+- Rebuild P1 controller actions after reconnect, including a saved pad absent at initial load; do not steal another player's controller or leave the native input handler pointing at disposed actions.
+- Use controller port/location keys for persistent assignment instead of InControl's random object GUID, with legacy name/ordinal migration.
+- Claim a late first controller for solo P1 with Start; reserve subsequent controllers for P2–P8 and respect menu/loading guards.
+- Add controlled production-input and UI regression coverage. Native hardware validation remains pending.
+
 ## v0.11.0 - 2026-10-14
 
 - Add saved named player profiles and portable adventure statistics, with validated equipment/control loading and duplicate-identity protection.

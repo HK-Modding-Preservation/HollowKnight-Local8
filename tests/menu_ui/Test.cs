@@ -146,6 +146,25 @@ static class Test {
   Click(owner,c=>c.Text==UiLocalization.Get("performance.restore"));Check(owner.Performance.Preset==0&&!owner.Performance.Automatic&&owner.Exports==1,"F8 restore callback fails");
   GameManager.instance=null;
  }
+ static void PrimaryInputMenu(string[] languages){
+  foreach(string language in languages){Language.Language.Code=language;
+   var r=Runtime(8);Controls.Available=Enumerable.Range(0,8).Select(i=>new InputDevice{Name="Controller "+i}).ToArray();
+   Controls.Available[2]=r.Session.Players[2].Device;
+   for(int width=200;width<=690;width+=35){
+    GUI.Reset(width+10,5000);float end=Hud.RenderPlayers(r,width);
+    var inputs=GUI.Controls.Where(c=>c.Tip==UiLocalization.Get("input.auto_tip")||c.Tip==UiLocalization.Get("input.keyboard_tip")||c.Tip==UiLocalization.Get("input.assign_tip")).ToArray();
+    Check(inputs.Length==10,"P1 mode or assigned-controller buttons missing");
+    Check(inputs.All(c=>c.Enabled),"occupied controller cannot be assigned to P1");
+    foreach(var c in inputs)Check(c.Rect.x>=0&&c.Rect.xMax<=width&&c.Rect.width>0&&c.Rect.yMax<end,"P1 controls exceed layout/scroll extent");
+    for(int i=0;i<inputs.Length;i++)for(int j=i+1;j<inputs.Length;j++){var a=inputs[i].Rect;var b=inputs[j].Rect;Check(a.x>=b.xMax||b.x>=a.xMax||a.y>=b.yMax||b.y>=a.yMax,"P1 controls overlap");}
+    Check(GUI.Paints.Any(p=>p.text==UiLocalization.Get("input.p1_title")&&p.rect[1]<80),"P1 control selection hidden below player profiles");
+   }
+   Hud.ResetTest(0);Click(r,c=>c.Tip==UiLocalization.Get("input.auto_tip"));Check(r.Session.AssignCalls==1,"Automatic P1 callback missing");
+   Click(r,c=>c.Tip==UiLocalization.Get("input.keyboard_tip"));Check(r.Session.AssignCalls==2&&r.Session.Primary.Device==InputDevice.Null,"P1 keyboard callback missing");
+   Click(r,c=>c.Tip==UiLocalization.Get("input.assign_tip"));Check(r.Session.AssignCalls==3,"P1 controller assignment callback missing");
+  }
+  Controls.Available=Array.Empty<InputDevice>();
+ }
  static void Main(string[] args){
   var r=Runtime(8);string[] langs={"ES","EN","FR","DE","IT","PT","RU","ZH","JA","KO"};
   foreach(string lang in langs){Language.Language.Code=lang;
@@ -164,6 +183,7 @@ static class Test {
    string sample=UiLocalization.Get("menu.font_sample")+UiLocalization.Get("tab.players")+UiLocalization.Get("respawn.label");
    foreach(char c in sample)Check(char.IsWhiteSpace(c)||MenuTheme.Label.font.HasCharacter(c),"Font drops language glyphs "+lang);
   }
+  PrimaryInputMenu(langs);
   Language.Language.Code="EN";Hud.ResetTest(1);Render(r);int allocation=Texture2D.Allocations,queries=Resources.Queries;
   int decodes=Texture2D.Decodes;
   for(int i=0;i<200;i++)Render(r);

@@ -113,10 +113,8 @@ public sealed class Local8Runtime : MonoBehaviour
 	{
 		Local8Settings settings = Local8Mod.Settings;
 		settings.Ensure();
-		if (string.IsNullOrEmpty(settings.PrimaryDevice) || settings.PrimaryDevice == "FirstGamepad")
-		{
-			settings.PrimaryDevice = "Keyboard";
-		}
+		settings.PrimaryDevice = PrimaryController.Normalize(settings.PrimaryDevice, settings.PrimaryInputVersion < 1);
+		settings.PrimaryInputVersion = 1;
 		Enabled = new Setting<bool>(settings.Enabled);
 		TintPlayers = new Setting<bool>(settings.TintPlayers);
 		HideOriginalHud = new Setting<bool>(settings.HideOriginalHUD);

@@ -80,7 +80,9 @@ public sealed class Local8Settings
 
 	public int[] PvpTeams = new int[8];
 
-	public string PrimaryDevice = "Keyboard";
+	public string PrimaryDevice = PrimaryController.Automatic;
+
+	public int PrimaryInputVersion;
 
 	public string MenuKey = "F8";
 

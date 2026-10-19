@@ -459,13 +459,17 @@ internal static class Hud
 	{
 		InputDevice d2 = d;
 		PlayerSlot playerSlot = s.Players.FirstOrDefault((PlayerSlot p) => p.Device == d2);
-		GUI.Label(new Rect(5f, row, cw - 230f, 26f), name + ((playerSlot != null) ? (" - P" + (playerSlot.Index + 1)) : UiLocalization.Get("common.unassigned_suffix")), small);
-		if (d != InputDevice.Null && playerSlot == null && s.Players.Count < 8 && MenuTheme.Button(new Rect(cw - 220f, row, 105f, 29f), UiLocalization.Get("action.join"), button))
+		bool compact = cw < 420f;
+		MenuTheme.Text(new Rect(5f, row, compact ? cw - 10f : cw - 230f, compact ? 42f : 29f), name + ((playerSlot != null) ? (" - P" + (playerSlot.Index + 1)) : UiLocalization.Get("common.unassigned_suffix")), MenuTheme.Paper, 13);
+		if (compact) row += 46f;
+		float width = compact ? (cw - 15f) * .5f : 105f;
+		float left = compact ? 5f : cw - 220f;
+		float right = compact ? 10f + width : cw - 110f;
+		if (d != InputDevice.Null && playerSlot == null && s.Players.Count < 8 && MenuTheme.Button(new Rect(left, row, width, 29f), UiLocalization.Get("action.join"), button))
 		{
 			s.Join(d2);
 		}
-		bool num = s.Players.Skip(1).Any((PlayerSlot p) => p.Device == d2);
-		if ((d == InputDevice.Null || !num) && MenuTheme.Button(new Rect(cw - 110f, row, 105f, 29f), UiLocalization.Get("common.assign_p1"), button))
+		if (MenuTheme.Button(new Rect(right, row, width, 29f), Help(UiLocalization.Get("common.assign_p1"), UiLocalization.Get("input.assign_tip")), button))
 		{
 			s.AssignPrimary(d2);
 		}
@@ -543,7 +547,16 @@ internal static class Hud
 
 	private static void PlayerOptions(Local8Runtime plugin,CoopSession s,InputDevice[] devices,float cw,ref float row)
 	{
-		MenuTheme.Section(UiLocalization.Get("players.title"),cw,ref row,0);
+		MenuTheme.Section(UiLocalization.Get("input.p1_title"),cw,ref row,0);
+		MenuTheme.Text(new Rect(5,row,cw-10,28),"P1: "+s.Primary.DeviceName,MenuTheme.Paper,15);row+=34;
+		float inputCell=(cw-10)*.5f;
+		if(MenuTheme.Choice(new Rect(5,row,inputCell-4,35),Help(UiLocalization.Get("input.auto"),UiLocalization.Get("input.auto_tip")),plugin.PrimaryDevice.Value=="Auto"))s.AssignPrimaryAutomatic();
+		if(MenuTheme.Choice(new Rect(5+inputCell,row,inputCell-4,35),Help(UiLocalization.Get("input.keyboard"),UiLocalization.Get("input.keyboard_tip")),plugin.PrimaryDevice.Value=="Keyboard"))s.AssignPrimary(InputDevice.Null);
+		row+=43;
+		MenuTheme.Text(new Rect(5,row,cw-10,60),UiLocalization.Get("input.p1_hint"),MenuTheme.Muted,13);row+=66;
+		foreach(InputDevice device in devices)DeviceRow(s,device,Controls.Label(device),cw,ref row);
+		row+=8;
+		MenuTheme.Section(UiLocalization.Get("players.title"),cw,ref row);
 		int columns=cw>=470?2:1;float cell=(cw-10)/columns;int n=0;
 		foreach(PlayerSlot player in s.Players)
 		{
@@ -587,9 +600,7 @@ internal static class Hud
 		if(p.Index>0&&Controls.IsKeyboard(p.Device)&&MenuTheme.Button(new Rect(cw*.5f,row,cw*.49f,35),UiLocalization.Get("menu.controls"),button)){addingKeyboard=false;ChangeTab(4);}
 		row+=45;
 		PlayerProfilesUI.Draw(s,p,cw,ref row);
-		MenuTheme.Section(UiLocalization.Get("menu.devices"),cw,ref row);
-		DeviceRow(s,InputDevice.Null,UiLocalization.Get("keyboard.shared"),cw,ref row);
-		foreach(InputDevice device in devices)DeviceRow(s,device,Controls.Label(device),cw,ref row);
+		MenuTheme.Section(UiLocalization.Get("keyboard.section"),cw,ref row);
 		if(MenuTheme.Button(new Rect(5,row,cw-10,34),UiLocalization.Get("keyboard.add"),button)){addingKeyboard=true;ChangeTab(4);}
 		row+=43;
 		MenuTheme.Section(UiLocalization.Get("menu.display"),cw,ref row);

@@ -24,6 +24,7 @@ private static Vector2 scroll;private static float[] menuHeight=new float[5];pri
 private static Color[] palette={Color.white,new Color(.4f,.85f,1),new Color(1,.55f,.45f),new Color(.55f,1,.6f),new Color(.95f,.65f,1),new Color(1,.88f,.4f),new Color(.55f,.62f,1),new Color(1,.64f,.84f),Color.white,new Color(.55f,1,.9f),new Color(1,.35f,.35f),new Color(.75f,.55f,1)};
 internal static void ResetTest(int page,int pvp=0){tab=page;pvpPage=pvp;adventurePage=false;selected=0;addingKeyboard=false;scroll=Vector2.zero;menuHeight=new float[5];}
 internal static void Render(Local8Runtime r,float w,float h){DrawMenu(r,w,h);}
+internal static float RenderPlayers(Local8Runtime r,float width){float row=0;PlayerOptions(r,r.Session,Controls.Devices().ToArray(),width,ref row);return row;}
 internal static void EditKeyboard(int who,bool adding){selected=who;addingKeyboard=adding;tab=4;scroll=Vector2.zero;}
 internal static int CurrentTab=>tab;
 internal static Vector2 Scroll=>scroll;

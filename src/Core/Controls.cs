@@ -249,6 +249,11 @@ internal static class Controls
 			UnityInputDevice unityInputDevice = device as UnityInputDevice;
 			return "vjoy|" + ((nativeInputDevice != null && !string.IsNullOrEmpty(nativeInputDevice.Info.location)) ? ("location:" + nativeInputDevice.Info.location) : ((unityInputDevice != null) ? ("joystick:" + unityInputDevice.JoystickId) : ("ordinal:" + VirtualIndex(device))));
 		}
+		// InControl's GUID is generated per object, not a persistent hardware ID.
+		if (device is NativeInputDevice native && !string.IsNullOrEmpty(native.Info.location))
+			return "native|" + native.Info.location + "|" + device.Name;
+		if (device is UnityInputDevice unity)
+			return "unity|" + unity.JoystickId + "|" + device.Name;
 		int num = 0;
 		foreach (InputDevice item in Devices())
 		{
@@ -266,11 +271,24 @@ internal static class Controls
 
 	internal static InputDevice Find(string key)
 	{
+		return Find(key, Devices());
+	}
+
+	internal static InputDevice Find(string key, IEnumerable<InputDevice> devices)
+	{
 		if (string.IsNullOrEmpty(key) || key == "Keyboard")
 		{
 			return InputDevice.Null;
 		}
-		return Devices().FirstOrDefault((InputDevice d) => Key(d) == key);
+		InputDevice[] available = devices.Where(d => d != null && d != InputDevice.Null && d.IsAttached && !d.Passive).ToArray();
+		InputDevice exact = available.FirstOrDefault(d => Key(d) == key);
+		if (exact != null) return exact;
+		// Upgrade pre-v0.11.1 GUID|name|ordinal preferences without requiring a reset.
+		int first = key.IndexOf('|'), last = key.LastIndexOf('|');
+		if (first != 32 || last <= first || !Guid.TryParseExact(key.Substring(0, first), "N", out _) ||
+			!int.TryParse(key.Substring(last + 1), out int ordinal) || ordinal < 0) return null;
+		string name = key.Substring(first + 1, last - first - 1);
+		return available.Where(d => d.Name == name).ElementAtOrDefault(ordinal);
 	}
 
 	internal static bool IsKeyboard(InputDevice device)
