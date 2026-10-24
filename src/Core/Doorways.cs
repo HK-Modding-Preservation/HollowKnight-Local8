@@ -299,6 +299,26 @@ internal static class Doorways
 		return info != null;
 	}
 
+	internal static GameObject WaitSource(PlayerSlot player, GameManager.SceneLoadInfo info, Fsm source)
+	{
+		if (source != null && source.GameObject && Destination(source, out var native)
+			&& native.SceneName == info.SceneName && native.EntryGateName == info.EntryGateName)
+			return source.GameObject;
+		// Custom entry animations finish outside the native FSM context.
+		// Remember the exact nearby door, rather than treating every door
+		// leading to the same room as unlocked while its prompt is hidden.
+		if (TransitionPoint.TransitionPoints != null)
+			foreach (TransitionPoint gate in TransitionPoint.TransitionPoints)
+				if (gate && gate.isADoor && gate.enabled && gate.gameObject.activeInHierarchy
+					&& DoorRouteFix.GateScene(gate) == info.SceneName && DoorRouteFix.GateEntry(gate) == info.EntryGateName
+					&& Near(gate, player) && !LockedNearby(gate)) return gate.gameObject;
+		foreach (Door door in doors)
+			if (door.Machine && Near(door, player) && Destination(door.Machine.Fsm, out var target)
+				&& target.SceneName == info.SceneName && target.EntryGateName == info.EntryGateName)
+				return door.Machine.gameObject;
+		return null;
+	}
+
 	internal static bool Tick(CoopSession s)
 	{
 		//Discarded unreachable code: IL_0147, IL_0168
@@ -349,7 +369,8 @@ internal static class Doorways
 						{
 							continue;
 						}
-						if (!flag2 || !PrerequisiteMet(DoorRouteFix.GateScene(item), s))
+						bool waiting = TransitionVote.WaitingDoor(item.gameObject, DoorRouteFix.GateScene(item), DoorRouteFix.GateEntry(item));
+						if ((!flag2 && !waiting) || !PrerequisiteMet(DoorRouteFix.GateScene(item), s))
 						{
 							Diagnostics.Write("DOOR gate waiting for native unlock P" + (player.Index + 1) + " gate=" + item.name + " entryPrompt=" + flag2 + " prerequisite=" + PrerequisiteMet(DoorRouteFix.GateScene(item), s));
 						}
@@ -404,13 +425,14 @@ internal static class Doorways
 					bool flag4 = Ready(door2.Machine.Fsm);
 					GameManager.SceneLoadInfo info;
 					bool flag5 = Destination(door2.Machine.Fsm, out info);
+					bool waiting = flag5 && TransitionVote.WaitingDoor(door2.Machine.gameObject, info.SceneName, info.EntryGateName);
 					Diagnostics.Write("DOOR request P" + (player.Index + 1) + " object=" + door2.Machine.name + " fsm=" + door2.Machine.FsmName + " state=" + ((door2.Machine.Fsm.ActiveState == null) ? "none" : door2.Machine.Fsm.ActiveState.Name) + " ready=" + flag4 + " visiblePrompt=" + flag2 + " destination=" + (flag5 ? (info.SceneName + "/" + info.EntryGateName) : "unresolved"));
-					if (!flag4 && flag2 && door2.Machine.Fsm.ActiveState != null)
+					if (!flag4 && (flag2 || waiting) && door2.Machine.Fsm.ActiveState != null)
 					{
 						string text = door2.Machine.Fsm.ActiveState.Name.ToLowerInvariant();
 						flag4 = !text.Contains("lock") && !text.Contains("bloque") && !text.Contains("closed");
 					}
-					if (flag4 && flag5 && flag2 && PrerequisiteMet(info.SceneName, s))
+					if (flag4 && flag5 && (flag2 || waiting) && PrerequisiteMet(info.SceneName, s))
 					{
 						float num5 = Vector2.Distance(player.Hero.transform.position, door2.Machine.transform.position);
 						if (num5 < num2)

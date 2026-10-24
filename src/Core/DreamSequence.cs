@@ -98,6 +98,7 @@ internal static class DreamSequence
 			{
 				float num = ((playerSlot2.Index % 2 == 0) ? 1f : (-1f)) * (0.85f + 0.45f * (float)((playerSlot2.Index - 1) / 2));
 				point = new Vector3(55.5f + num, 7.4f, (float)CoopRules.PlayerDepth(playerSlot2.Index));
+				if (!s.IsSafe(point, playerSlot2) && !s.NearAlly(playerSlot, playerSlot2, out point)) continue;
 				Vector3 position2 = playerSlot2.Hero.transform.position;
 				NativeDreamFx.TeleportTrail(playerSlot2, position2, point);
 				playerSlot2.Hero.transform.position = point;
@@ -107,7 +108,7 @@ internal static class DreamSequence
 					component.velocity = Vector2.zero;
 				}
 				playerSlot2.SafePoint = point;
-				playerSlot2.HasSafePoint = true;
+				playerSlot2.HasSafePoint = s.IsSafe(point, playerSlot2);
 				playerSlot2.SafeAt = Time.unscaledTime;
 			}
 		}

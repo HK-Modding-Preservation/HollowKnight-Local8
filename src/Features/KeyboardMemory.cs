@@ -13,7 +13,7 @@ internal static class KeyboardMemory {
  internal static void Restore(PlayerSlot p){
   if(p==null||p.Index<=0||p.Index>=8||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
   try{Ensure();string data=Local8Mod.Settings.ExtraKeyboardBindings[p.Index];if(string.IsNullOrEmpty(data))return;
-   p.Actions.Load(data);Diagnostics.Write("KEYBOARD restored P"+(p.Index+1));
+   if(KeyboardBindingData.TryLoad(p.Actions,data))Diagnostics.Write("KEYBOARD restored P"+(p.Index+1));
   }catch(Exception e){Diagnostics.Throttled("KEYBOARD restore",e);}
  }
  internal static void BeforeCapture(){capturing=ActionKeys.Capturing;selected=Hud.selected;}
@@ -21,7 +21,12 @@ internal static class KeyboardMemory {
   if(capturing<10||capturing>22||ActionKeys.Capturing!=0||s==null)return;
   try{
    PlayerSlot p=null;foreach(var candidate in s.Players)if(candidate.Index==selected){p=candidate;break;}
-   if(p==null||p.Index<=0||p.Index>=8||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
+   Save(p);
+  }catch(Exception e){Diagnostics.Throttled("KEYBOARD save",e);}
+ }
+ internal static void Save(PlayerSlot p){
+  if(p==null||p.Index<=0||p.Index>=8||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
+  try{
    Ensure();string data=p.Actions.Save();if(data==Local8Mod.Settings.ExtraKeyboardBindings[p.Index])return;
    Local8Mod.Settings.ExtraKeyboardBindings[p.Index]=data;
    if(Local8Mod.Instance!=null){if(saveSettings==null)throw new MissingMethodException("Mod.SaveGlobalSettings");saveSettings.Invoke(Local8Mod.Instance,null);}

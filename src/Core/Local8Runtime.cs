@@ -13,6 +13,8 @@ public sealed class Local8Runtime : MonoBehaviour
 
 	internal CoopSession Session;
 
+	internal readonly LobbyRoster Lobby = new LobbyRoster();
+
 	internal Setting<bool> Enabled;
 
 	internal Setting<bool> TintPlayers;
@@ -104,6 +106,7 @@ public sealed class Local8Runtime : MonoBehaviour
 		CrystalDashCoop.Install();
 		PvpRoundClock.Migrate();
 		RoleSystem.Install();
+		CoopSetupHint.Install();
 		PvpCharms.Install();
 		PlayerProfiles.Normalize();
 		AdventureStats.Install();
@@ -203,7 +206,8 @@ public sealed class Local8Runtime : MonoBehaviour
 			ForceCursor();
 			if (!MenuInput.Waiting && ActionKeys.Capturing == 0 && MenuInput.Key != KeyCode.F9 && KeypadInput.Pressed(KeyCode.F9) && Session != null)
 			{
-				Session.JoinFirstAvailable();
+				if (Session.Primary == null) Lobby.JoinFirstAvailable();
+				else Session.JoinFirstAvailable();
 			}
 		}
 		if (Session != null && Enabled.Value && !faulted)
@@ -218,13 +222,16 @@ public sealed class Local8Runtime : MonoBehaviour
 			}
 		}
 		CrystalDashTransit.Tick();
+		TitleLobby.Tick(this);
 		HitStopIsolation.Tick();
+		FuryRecovery.Tick(Session);
 		RadianceAscentCheckpoint.Tick();
 		BenchPoseRecovery.Tick();
 		CrystalDashCoop.Tick();
 		PvpArena.Update(this);
 		PvpSpellOnly.Tick(this);
 		BossMusicGuard.Tick();
+		CoopSetupHint.Tick(this);
 		RoleSystem.Tick(this);
 		ArenaVisualRecovery.Tick();
 		ArenaReturnRecovery.Tick();
@@ -242,6 +249,8 @@ public sealed class Local8Runtime : MonoBehaviour
 
 	private void LateUpdate()
 	{
+		try { TitleCoopBadge.Tick(this); }
+		catch (Exception ex) { Diagnostics.Throttled("MENU DLC icon", ex); }
 		if (RoarMotionRecovery.Active) RoarMotionRecovery.LateTick(Session);
 		if (Panel)
 		{
@@ -287,10 +296,12 @@ public sealed class Local8Runtime : MonoBehaviour
 
 	private void OnDestroy()
 	{
+		CoopSetupHint.Uninstall();
 		PerformancePresets.Shutdown(this);
 		PlayerProfiles.Flush(Session);
 		AdventureStats.Uninstall();
 		RoleSystem.Shutdown();
+		LobbyMenuInput.Restore();
 		RestoreCursor();
 		UnityEngine.SceneManagement.SceneManager.activeSceneChanged -= OnScene;
 		Application.logMessageReceived -= OnUnityLog;
@@ -299,6 +310,7 @@ public sealed class Local8Runtime : MonoBehaviour
 		{
 			Session.Dispose();
 		}
+		TitleCoopBadge.Release();
 		Hud.ReleaseAssets();
 		SkinBridge.ClearCache();
 		Hooks.Uninstall();
@@ -339,12 +351,14 @@ public sealed class Local8Runtime : MonoBehaviour
 				previousCursorLock = Cursor.lockState;
 				cursorCaptured = true;
 				Panel = true;
+				LobbyMenuInput.Sync(TitleLobby.Visible);
 				ModHooks.CursorHook += ForceCursor;
 				ForceCursor();
 			}
 			else
 			{
 				Panel = false;
+				LobbyMenuInput.Close();
 				MenuInput.Waiting = false;
 				ActionKeys.Capturing = 0;
 				Charms.Close();

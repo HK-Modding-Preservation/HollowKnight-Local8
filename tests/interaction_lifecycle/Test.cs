@@ -1,7 +1,7 @@
 using System;using System.Linq;using UnityEngine;using HutongGames.PlayMaker;using HutongGames.PlayMaker.Actions;using KO.HollowKnight8;
 class Test {
  static int checks;static void Check(bool ok,string why){checks++;if(!ok)throw new Exception(why);}
- static CoopSession Setup(int count=4){InteractionRouter.Clear();LegacyRouter.Clear();BenchSeats.Seats.Clear();BenchSeats.CustomSeats.Clear();ActorRecovery.Resets.Clear();Diagnostics.Messages.Clear();InteractionControlLifecycle.Source=WorldRouting.Current=null;Time.frameCount=100;Time.unscaledTime=Time.time=10;var s=new CoopSession();for(int i=0;i<count;i++){var go=new GameObject("Knight P"+(i+1));var h=go.Add<HeroController>();go.Add<Rigidbody2D>();go.Add<HeroAnimationController>();h.transform.position=new(i+1,0);s.Players.Add(new(){Index=i,Hero=h});}Plugin.Self=new(){Session=s};GameManager.instance=new();UIManager.instance=new();ShopMenuRouting.Buyer=null;ShopMenuRouting.MenuVisible=false;PickupCard.Owner=null;StagMenuRouting.HasOwner=false;ScriptedParty.Active=CoopEnding.Active=PvpMatch.Running=DreamSequence.InStoryDream=false;EmergencyWarp.Held.Clear();TransitionVote.Held.Clear();Charms.ReleaseNative();return s;}
+ static CoopSession Setup(int count=4){HornetEncounterFlow.Reset();WorldRouting.Routed=null;InteractionRouter.Clear();LegacyRouter.Clear();BenchSeats.Seats.Clear();BenchSeats.CustomSeats.Clear();ActorRecovery.Resets.Clear();Diagnostics.Messages.Clear();InteractionControlLifecycle.Source=WorldRouting.Current=null;Time.frameCount=100;Time.unscaledTime=Time.time=10;var s=new CoopSession();for(int i=0;i<count;i++){var go=new GameObject("Knight P"+(i+1));var h=go.Add<HeroController>();go.Add<Rigidbody2D>();go.Add<HeroAnimationController>();h.transform.position=new(i+1,0);s.Players.Add(new(){Index=i,Hero=h});}Plugin.Self=new(){Session=s};GameManager.instance=new();UIManager.instance=new();ShopMenuRouting.Buyer=null;ShopMenuRouting.MenuVisible=false;PickupCard.Owner=null;StagMenuRouting.HasOwner=false;ScriptedParty.Active=CoopEnding.Active=PvpMatch.Running=DreamSequence.InStoryDream=false;EmergencyWarp.Held.Clear();TransitionVote.Held.Clear();Charms.ReleaseNative();return s;}
  static Fsm Npc(PlayerSlot p,bool bench=false){var f=new Fsm{Name=bench?"Bench Control":"npc_control",GameObject=new GameObject(bench?"RestBench":"Leg Eater")};f.ActiveState=new(){Fsm=f,Name="In Range",Actions=new FsmStateAction[]{new ListenForUp()}};f.Range.Add(p);InteractionRouter.Seed(f,p,bench);LegacyRouter.Seed(f,p,bench);return f;}
  static void Talking(Fsm f){f.ActiveState=new(){Fsm=f,Name="Conversation"};}
  static void Take(Fsm f,PlayerSlot p,bool velocity=false){var previous=InteractionControlLifecycle.Source;InteractionControlLifecycle.Source=f;try{On.HeroController.Take(p.Hero,velocity);}finally{InteractionControlLifecycle.Source=previous;}}
@@ -56,7 +56,28 @@ class Test {
   for(int count=2;count<=8;count++){s=Setup(count);Inventory();for(int cycle=0;cycle<20;cycle++){Charms.Freeze(s);Charms.Freeze(s);for(int i=1;i<count;i++)Check(s.Players[i].Hero.GetComponent<Rigidbody2D>().isKinematic,"inventory freezes guest exactly once");Charms.ReleaseNative();for(int i=1;i<count;i++)Check(!s.Players[i].Hero.GetComponent<Rigidbody2D>().isKinematic,"repeated inventory restores guest body");Inventory();}var body=s.Players[1].Hero.GetComponent<Rigidbody2D>();body.isKinematic=true;Charms.Freeze(s);Charms.ReleaseNative();Check(body.isKinematic,"inventory preserves legitimate seat snapshot");}
   s=Setup();p=s.Players[1];f=Npc(p,true);p.Vitals.AtBench=true;BenchSeats.Seats.Add(p);InteractionRouter.Select(f);Check(InteractionRouter.ActivePlayer==p&&InteractionRouter.ActiveIsBench,"native already seated join preserved");Inventory();Check(CharmMenuExit.NativeActive(true),"native bench charm overlay preserved");ShopMenuRouting.Buyer=p;ShopMenuRouting.MenuVisible=true;Check(!CharmMenuExit.NativeActive(true),"real shop retains menu input");
   s=Setup();p=s.Players[1];f=Npc(p,true);Talking(f);Take(f,p);p.Vitals.AtBench=true;BenchSeats.Seats.Add(p);On.HeroController.Return(p.Hero);Next();Check(InteractionRouter.ActivePlayer==p&&InteractionRouter.ActiveIsBench,"native bench remains seated after returning movement control");Next(5);Check(InteractionRouter.Holds(p),"native seat does not expire before leave");p.Vitals.AtBench=false;BenchSeats.Seats.Remove(p);Check(InteractionRouter.ActivePlayer==null,"native seat claim ends on real leave");
-  InteractionControlLifecycle.Uninstall();InteractionControlLifecycle.Uninstall();Check(On.HeroController.TakeCount==0&&On.HeroController.TakeVelocityCount==0&&On.HeroController.ReturnCount==0,"control hooks uninstall balanced");
+  Hornet();InteractionControlLifecycle.Uninstall();InteractionControlLifecycle.Uninstall();Check(On.HeroController.TakeCount==0&&On.HeroController.TakeVelocityCount==0&&On.HeroController.ReturnCount==0,"control hooks uninstall balanced");
   Console.WriteLine("PASS "+checks+" production interaction/control/charm/recovery checks; alpha226 false-ownership cases reproduced. Unity gameplay remains untested.");
  }
+ static void Hornet(){
+  for(int index=0;index<8;index++){
+   var s=Setup(8);var p=s.Players[index];var other=s.Players[(index+1)%8];
+   var f=new Fsm{Name="Encounter",GameObject=new GameObject("Hornet Infected Knight Encounter")};
+   foreach(string name in new[]{"Point","Box Up","Dialogue","Box Down","Set Hero Active","Leap Antic","Start Fight"})f.States.Add(new(){Name=name,Fsm=f});
+   f.ActiveState=f.GetState("Point");WorldRouting.Routed=p;
+   Hooks.State(state=>{Check(PlayerContext.Current==p,"automatic intro initial context");On.HeroController.Take(p.Hero);},f.ActiveState);
+   Check(HornetEncounterFlow.Holds(p)&&InteractionRouter.ActivePlayer==null,"automatic encounter was not held independently of NPC prompts");
+   f.ActiveState=f.GetState("Dialogue");WorldRouting.Routed=other;p.Actions.moveVector.X=1;
+   s.Check(p);Next(4);s.Check(p);Check(ActorRecovery.Resets.Count==0,"movement input broke Hornet's native dialogue control");
+   other.Hero.controlReqlinquished=true;other.Actions.moveVector.X=1;s.Check(other);Next(4);s.Check(other);
+   Check(ActorRecovery.Resets.SequenceEqual(new[]{other})&&p.Hero.controlReqlinquished,"Hornet dialogue immunized or reset another actor");
+   f.ActiveState=f.GetState("Set Hero Active");Hooks.Call(action=>{
+    Check(PlayerContext.Current==p,"Hornet RegainControl switched to the other touching actor");On.HeroController.Return(p.Hero);
+   },new(){Fsm=f,methodName=new(){Value="RegainControl"}});
+   Check(!p.Hero.controlReqlinquished&&!HornetEncounterFlow.Holds(other),"native intro returned the wrong hero");
+   f.ActiveState=f.GetState("Leap Antic");Check(!HornetEncounterFlow.Holds(p),"intro hold outlived native control return");
+   f.ActiveState=f.GetState("Start Fight");Hooks.State(state=>{},f.ActiveState);Check(HornetEncounterFlow.Resolve(f)==null,"native fight retained dialogue owner");
+  }
+ }
+
 }

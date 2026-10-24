@@ -1,0 +1,48 @@
+private Vector3 JoinDestination()
+	{
+		if (Primary == null || !Primary.Hero)
+		{
+			return Vector3.zero;
+		}
+		PlayerSlot anchor = ArenaGather.Anchor;
+		if (anchor != null && anchor != Primary && IsSafe(anchor.Hero.transform.position, anchor))
+		{
+			return anchor.Hero.transform.position;
+		}
+		if (Primary.Down)
+		{
+			PlayerSlot playerSlot = Players.FirstOrDefault((PlayerSlot p) => p != Primary && p.Alive && p.Ready && IsSafe(p.Hero.transform.position, p));
+			if (playerSlot != null)
+			{
+				return playerSlot.Hero.transform.position;
+			}
+		}
+		Vector3 vector = ((HasArrival && !Primary.Alive) ? Arrival : Primary.Hero.transform.position);
+		if (IsSafe(vector, Primary))
+		{
+			return vector;
+		}
+		if (Primary.HasSafePoint && Vector2.Distance(vector, Primary.SafePoint) < 8f && IsSafe(Primary.SafePoint, Primary))
+		{
+			return Primary.SafePoint;
+		}
+		GameManager instance = GameManager.instance;
+		if ((bool)instance && (bool)instance.cameraCtrl)
+		{
+			Vector3 vector2 = new Vector3(Mathf.Clamp(vector.x, 1.5f, Mathf.Max(1.5f, instance.cameraCtrl.sceneWidth - 1.5f)), Mathf.Clamp(vector.y, 1.5f, Mathf.Max(1.5f, instance.cameraCtrl.sceneHeight - 1.5f)), vector.z);
+			if (IsSafe(vector2, Primary))
+			{
+				return vector2;
+			}
+			if ((bool)Physics2D.Raycast(new Vector2(vector2.x, vector2.y + 2f), Vector2.down, 12f, 256).collider)
+			{
+				Vector3 vector3 = Primary.Hero.FindGroundPoint(new Vector2(vector2.x, vector2.y + 2f), useExtended: true);
+				if (IsSafe(vector3, Primary))
+				{
+					return vector3;
+				}
+			}
+			return vector2;
+		}
+		return vector;
+	}

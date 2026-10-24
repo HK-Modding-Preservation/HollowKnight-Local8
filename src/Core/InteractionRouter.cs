@@ -1119,6 +1119,21 @@ internal static class InteractionRouter
 		}
 	}
 
+	// The native door has finished entering, but its scene load is waiting
+	// for the party. Release only that door's reservation so another actor
+	// can enter; the voter remains held by TransitionVote.
+	internal static Fsm CompleteRoomEntry(PlayerSlot player)
+	{
+		Fsm source = null;
+		foreach (Entry entry in entries.Values)
+		{
+			if (entry.Owner != player || !entry.Busy || !entry.Scene) continue;
+			source = entry.Fsm;
+			End(entry, "room-wait");
+		}
+		return source;
+	}
+
 	internal static void CloseForTransition()
 	{
 		PlayerSlot playerSlot = ((active == null) ? null : active.Owner);
@@ -1179,8 +1194,9 @@ internal static class InteractionRouter
 						PlayerSlot playerSlot = s.Players[i];
 						if (playerSlot.Ready && playerSlot.Alive && (bool)playerSlot.Hero && playerSlot.Hero.transform.position.x < 19f)
 						{
-							NativeDreamFx.TeleportTrail(playerSlot, playerSlot.Hero.transform.position, s.Players[num].Hero.transform.position);
-							playerSlot.Hero.transform.position = s.Players[num].Hero.transform.position;
+							if (!s.NearAlly(s.Players[num], playerSlot, out var landing)) continue;
+							NativeDreamFx.TeleportTrail(playerSlot, playerSlot.Hero.transform.position, landing);
+							playerSlot.Hero.transform.position = landing;
 						}
 					}
 				}

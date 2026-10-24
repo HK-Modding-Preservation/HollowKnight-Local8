@@ -19,6 +19,10 @@ internal static class WorldRouting
 
 		internal PlayerSlot Player;
 
+		internal HeroController Hero;
+
+		internal int LocalMove;
+
 		internal Vector3 Position;
 
 		internal int RoarScope;
@@ -41,6 +45,18 @@ internal static class WorldRouting
 	private static readonly Vector3[] previous = new Vector3[8];
 
 	private static readonly bool[] sampled = new bool[8];
+
+	private static readonly int[] localMoves = new int[8];
+
+	// A hazard/terrain recovery belongs to one actor. It is not a native
+	// story teleport which should pull the rest of the party along.
+	internal static void LocalRecovery(PlayerSlot p)
+	{
+		if (p == null || p.Index < 0 || p.Index >= localMoves.Length) return;
+		localMoves[p.Index]++;
+		sampled[p.Index] = false;
+		if (warp == p) warp = null;
+	}
 
 	internal static PlayerSlot Touch(Fsm f, Collider2D collider, bool exit)
 	{
@@ -205,6 +221,8 @@ internal static class WorldRouting
 		Call call = default(Call);
 		call.Previous = Current;
 		call.Player = playerSlot;
+		call.Hero = playerSlot?.Hero;
+		call.LocalMove = playerSlot != null && playerSlot.Index >= 0 && playerSlot.Index < localMoves.Length ? localMoves[playerSlot.Index] : 0;
 		call.Position = ((playerSlot != null && (bool)playerSlot.Hero) ? playerSlot.Hero.transform.position : Vector3.zero);
 		// Roar actions may nest another FSM before returning to this one.
 		// Track only root Roar Lock callbacks so cleanup waits for all actions.
@@ -220,7 +238,9 @@ internal static class WorldRouting
 		if (before.RoarScope != 0 || RoarMotionRecovery.Active) RoarMotionRecovery.AfterFsm(f, before.Player, before.RoarScope);
 		CoopSession coopSession = ((Plugin.Self == null) ? null : Plugin.Self.Session);
 		PlayerSlot player = before.Player;
-		if (coopSession == null || !coopSession.Active || player == null || !player.Ready || !player.Alive)
+		if (coopSession == null || !coopSession.Active || player == null || !player.Ready || !player.Alive
+			|| player.Hero != before.Hero || player.Index < 0 || player.Index >= localMoves.Length
+			|| before.LocalMove != localMoves[player.Index])
 		{
 			return;
 		}
@@ -312,17 +332,19 @@ internal static class WorldRouting
 			{
 				if (player != playerSlot && player.Ready && player.Alive)
 				{
+					Vector3 landing = result;
+					if (!s.IsSafe(landing, player) && !s.NearAlly(playerSlot, player, out landing)) continue;
 					Vector3 position = player.Hero.transform.position;
-					NativeDreamFx.TeleportTrail(player, position, result);
+					NativeDreamFx.TeleportTrail(player, position, landing);
 					using (PlayerContext.Enter(player))
 					{
 						ActorRecovery.Reset(player);
-						player.Hero.transform.position = result;
+						player.Hero.transform.position = landing;
 						CoopSession.RestoreLivingVisuals(player);
 					}
-					player.SafePoint = result;
+					player.SafePoint = landing;
 					player.HasSafePoint = true;
-					player.Vitals.HazardPoint = result;
+					player.Vitals.HazardPoint = landing;
 					player.ProtectionUntil = Time.time + 1f;
 				}
 			}
@@ -340,6 +362,7 @@ internal static class WorldRouting
 		for (int i = 0; i < sampled.Length; i++)
 		{
 			sampled[i] = false;
+			localMoves[i] = 0;
 		}
 		bathColliders = new Collider2D[0];
 		nextBathScan = 0f;

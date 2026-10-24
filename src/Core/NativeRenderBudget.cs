@@ -7,20 +7,18 @@ namespace KO.HollowKnight8;
 
 // Reduce real full-screen rendering work. Do not alter the camera viewport,
 // colour grading, brightness, healing particles, collision or input cadence.
+// Preserve native background sampling: downscaling it causes moving scenery
+// to shimmer, and reducing its blur passes exposes those sampling changes.
 internal static class NativeRenderBudget
 {
     private static readonly FieldInfo BloomResolution = Reflect.Field(typeof(BloomOptimized), "resolution");
-    private static readonly FieldInfo BlurTexture = Reflect.Field(typeof(LightBlurredBackground), "renderTexture");
-    private static readonly MethodInfo ResizeBlur = Reflect.Method(typeof(LightBlurredBackground), "OnCameraAspectChanged");
     private static Camera camera;
     private static BloomOptimized bloom;
     private static FastNoise noise;
-    private static LightBlurredBackground blur;
-    private static int originalIterations, appliedIterations, originalHeight, appliedHeight, originalPasses, appliedPasses;
+    private static int originalIterations, appliedIterations;
     private static object originalResolution;
     private static bool originalNoise;
     private static bool originalBloomEnabled, appliedBloomEnabled, bloomTouched;
-    private static ShaderQualities quality;
     private static int frame = -1;
 
     internal static void Reset()
@@ -33,24 +31,7 @@ internal static class NativeRenderBudget
                 BloomResolution.SetValue(bloom, originalResolution);
         }
         if (noise && !noise.enabled) noise.enabled = originalNoise;
-        if (blur)
-        {
-            if (blur.PassGroupCount == appliedPasses) blur.PassGroupCount = originalPasses;
-            if (blur.RenderTextureHeight == appliedHeight)
-            {
-                blur.RenderTextureHeight = originalHeight;
-                RefreshTexture(blur);
-            }
-        }
-        camera = null; bloom = null; noise = null; blur = null; originalResolution = null; frame = -1; bloomTouched = false;
-    }
-    private static void RefreshTexture(LightBlurredBackground background)
-    {
-        if (!background || !background.enabled || !background.gameObject.activeInHierarchy ||
-            BlurTexture == null || ResizeBlur == null) return;
-        var texture = BlurTexture.GetValue(background) as RenderTexture;
-        if (texture && texture.height != background.RenderTextureHeight)
-            ResizeBlur.Invoke(background, new object[] { ForceCameraAspect.CurrentViewportAspect });
+        camera = null; bloom = null; noise = null; originalResolution = null; frame = -1; bloomTouched = false;
     }
     internal static void BeforeCamera(Camera rendering)
     {
@@ -60,7 +41,7 @@ internal static class NativeRenderBudget
             gm && gm.IsGameplayScene() && !gm.IsLoadingSceneTransition && cameras && cameras.mainCamera;
         if (!active)
         {
-            if (camera || blur || bloom || noise) Reset();
+            if (camera || bloom || noise) Reset();
             return;
         }
         try
@@ -77,23 +58,6 @@ internal static class NativeRenderBudget
                 }
                 if (noise) originalNoise = noise.enabled;
                 Diagnostics.Write("PERF graphics detail=" + PerformanceTuning.Detail + " bloom=" + PerformanceTuning.Bloom);
-            }
-            var background = NativeBackground.Controller;
-            if (blur != background)
-            {
-                // Camera/component replacement also occurs after graphics-quality changes.
-                if (blur)
-                {
-                    if (blur.PassGroupCount == appliedPasses) blur.PassGroupCount = originalPasses;
-                    if (blur.RenderTextureHeight == appliedHeight) { blur.RenderTextureHeight = originalHeight; RefreshTexture(blur); }
-                }
-                blur = background;
-                if (blur)
-                {
-                    originalHeight = blur.RenderTextureHeight; originalPasses = blur.PassGroupCount;
-                    quality = gm.gameSettings.shaderQuality;
-                }
-                frame = -1;
             }
             if (frame == Time.frameCount) return;
             frame = Time.frameCount;
@@ -118,22 +82,6 @@ internal static class NativeRenderBudget
                 }
             }
             if (noise && detail > 0) { if (noise.enabled) originalNoise = true; noise.enabled = false; }
-            if (blur && detail > 0)
-            {
-                if (quality != gm.gameSettings.shaderQuality)
-                {
-                    quality = gm.gameSettings.shaderQuality;
-                    originalPasses = quality == ShaderQualities.Low ? 1 : 2;
-                }
-                else if (blur.PassGroupCount != appliedPasses && blur.PassGroupCount != originalPasses)
-                    originalPasses = blur.PassGroupCount;
-                if (blur.RenderTextureHeight != appliedHeight && blur.RenderTextureHeight != originalHeight)
-                    originalHeight = blur.RenderTextureHeight;
-                appliedPasses = Math.Min(1, originalPasses);
-                appliedHeight = Math.Min(originalHeight, Math.Max(128, originalHeight / (detail == 2 ? 4 : 2)));
-                blur.PassGroupCount = appliedPasses; blur.RenderTextureHeight = appliedHeight;
-                RefreshTexture(blur);
-            }
         }
         catch (Exception e) { Reset(); Diagnostics.Throttled("PERF graphics", e); }
     }

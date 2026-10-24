@@ -8,7 +8,9 @@ namespace KO.HollowKnight8 {
 // Cosmetic followers only. The primary's native FSM and scene loader remain
 // the sole owners of the ending; no participant count can delay either one.
 internal static class EndingAbsorption {
- internal const float FadeSeconds=4.8f, SafetySeconds=12f;
+ // The native corpse, chain-break and blanker waits take about twenty seconds.
+ // Leave that sequence time to finish before recovering an abandoned cosmetic.
+ internal const float FadeSeconds=4.8f, SafetySeconds=32f;
  sealed class Flash {
   internal Renderer Renderer;internal MaterialPropertyBlock Original=new MaterialPropertyBlock(),Working=new MaterialPropertyBlock();
  }
@@ -42,10 +44,17 @@ internal static class EndingAbsorption {
   string path=(state.Fsm.Name+"/"+(state.Fsm.GameObject?state.Fsm.GameObject.name:"")+"/"+state.Name).ToLowerInvariant();
   if(path.Contains("corpse/boss corpse/set knight focus")){armedUntil=Time.time+30f;return;}
   var p=s.Primary;if(p==null||!p.Hero||!p.Hero.spellControl||state.Fsm!=p.Hero.spellControl.Fsm)return;
+  if(active){
+   // Releasing focus before the native ending commits returns through this
+   // state. Restore only our captured guests; P1's FSM regains its own control.
+   if(s==session&&p==primary&&p.Hero==target&&state.Name=="Regain Control"&&!handoff&&!GameManager.instance.IsLoadingSceneTransition){
+    Diagnostics.Write("ENDING native focus cancelled; follower controls restored");Reset();
+   }
+   return;
+  }
   // Focus Start D is the native absorption entry. Some skins/mods reuse
   // Focus Start instead: allow that only after the exact corpse instruction.
   if(state.Name!="Focus Start D"&&!(Time.time<armedUntil&&state.Name=="Focus Start"))return;
-  if(active)return;
   Start(s,p);
  }
  static void Start(CoopSession s,PlayerSlot p){
@@ -106,7 +115,10 @@ internal static class EndingAbsorption {
   if(!InRoom()||!target||primary==null||primary.Hero!=target){Reset();return;}
   if(gm.isPaused)return;
   elapsed+=Mathf.Max(0,Time.deltaTime);
-  if(elapsed>=SafetySeconds&&!climax&&!handoff){Diagnostics.Write("ENDING incomplete cosmetic timeout; follower controls restored");Reset();return;}
+  // A completed visual is not proof of a completed native ending. This also
+  // covers a loader that returned to this room after beginning its handoff.
+  // Actual native loading above remains untouched, however long it takes.
+  if(elapsed>=SafetySeconds){Diagnostics.Write("ENDING incomplete cosmetic timeout; follower controls restored");Reset();return;}
   for(int i=actors.Count-1;i>=0;i--){var a=actors[i];if(!Valid(a)){
     if(climax||handoff){if(!a.Released)Release(a,false);continue;}
     Release(a);actors.RemoveAt(i);continue;

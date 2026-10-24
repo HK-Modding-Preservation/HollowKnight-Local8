@@ -2,6 +2,18 @@
 
 Public changes to Hollow Knight 8-Player Co-op.
 
+## v0.11.2 - 2026-10-24
+
+- Correct shared controller configuration resets, P1 movement/input isolation, controller/keyboard selection and lobby joining.
+- Add title-screen co-op settings, a compatible DLC-row badge and a one-time translated setup-key hint for new saves.
+- Repair party enemy sensors/Baldur proximity without overriding the native attack and armor rules.
+- Preserve native stag/dream routes and restore visible room waiting, safe body placement, local stuck recovery and falling-platform hazard handling.
+- Gather the party for Hornet's first dialogue and gate closure, and preserve native departure, dash acquisition and ending progression.
+- Share SOUL totem and Lifeblood rewards with nearby eligible actors; handle deferred native lifeseed healing without duplicated grants.
+- Add optional subtle hazard/HUD health feedback, recover stale Fury visuals and keep fight music through individual deaths.
+- Preserve the final companion focus/dissolve/essence animation and restore captured companions after a cancelled or abandoned ending.
+- Include 37 controlled regression suites, exact native-method checks where documented and deterministic release reconstruction. Native campaign/hardware validation remains separate.
+
 ## v0.11.1 - 2026-10-19
 
 - Default P1 to Automatic controller selection instead of forcing keyboard. Prefer the active/first attached controller and allow 2–8 controller-only players.

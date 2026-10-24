@@ -227,6 +227,8 @@ internal static class EmergencyWarp
 		{
 			return;
 		}
+		CoopSession session = Plugin.Self == null ? null : Plugin.Self.Session;
+		if (!SpawnSafety.RestoreRescue(session, trip)) return;
 		using (PlayerContext.Enter(player))
 		{
 			ActorRecovery.Reset(player);

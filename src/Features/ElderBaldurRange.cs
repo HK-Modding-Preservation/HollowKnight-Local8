@@ -14,7 +14,7 @@ internal static class ElderBaldurRange
 {
     private static bool installed;
     private static readonly Dictionary<Fsm, HealthManager> blockers = new Dictionary<Fsm, HealthManager>();
-    private static readonly Dictionary<AlertRange, Collider2D[]> sensors = new Dictionary<AlertRange, Collider2D[]>();
+    private static readonly Dictionary<GameObject, Collider2D[]> sensors = new Dictionary<GameObject, Collider2D[]>();
     private static readonly Dictionary<HeroController, Collider2D[]> bodies = new Dictionary<HeroController, Collider2D[]>();
     private static CoopSession Session => Plugin.Self == null ? null : Plugin.Self.Session;
 
@@ -25,6 +25,8 @@ internal static class ElderBaldurRange
         On.HutongGames.PlayMaker.Actions.GetDistance.DoGetDistance += Distance;
         On.HutongGames.PlayMaker.Actions.GetXDistance.DoGetDistance += XDistance;
         On.HutongGames.PlayMaker.Actions.FloatCompare.DoCompare += Compare;
+        On.HutongGames.PlayMaker.Actions.BoolTest.OnEnter += BoolEnter;
+        On.HutongGames.PlayMaker.Actions.BoolTest.OnUpdate += BoolUpdate;
         On.CheckAlertRange.Apply += Alert;
         On.CheckAlertRangeByName.Apply += NamedAlert;
     }
@@ -36,12 +38,14 @@ internal static class ElderBaldurRange
         On.HutongGames.PlayMaker.Actions.GetDistance.DoGetDistance -= Distance;
         On.HutongGames.PlayMaker.Actions.GetXDistance.DoGetDistance -= XDistance;
         On.HutongGames.PlayMaker.Actions.FloatCompare.DoCompare -= Compare;
+        On.HutongGames.PlayMaker.Actions.BoolTest.OnEnter -= BoolEnter;
+        On.HutongGames.PlayMaker.Actions.BoolTest.OnUpdate -= BoolUpdate;
         On.CheckAlertRange.Apply -= Alert;
         On.CheckAlertRangeByName.Apply -= NamedAlert;
         Reset();
     }
 
-    internal static void Reset() { blockers.Clear(); sensors.Clear(); bodies.Clear(); }
+    internal static void Reset() { blockers.Clear(); sensors.Clear(); bodies.Clear(); ColliderGeometry.Reset(); }
 
     private static bool Blocker(Fsm fsm)
     {
@@ -140,11 +144,47 @@ internal static class ElderBaldurRange
         orig(action);
     }
 
+    private static bool RefreshBool(BoolTest action)
+    {
+        if (!Blocker(action.Fsm) || action.boolVariable == null || !action.boolVariable.UseVariable) return false;
+        string child;
+        switch (action.boolVariable.Name)
+        {
+            case "In Alert Range": child = "Alert Range New"; break;
+            case "In Attack Range": child = "Attack Range"; break;
+            case "Unalert Range": child = "Unalert Range"; break;
+            default: return false;
+        }
+        // The separate hero_detect_bool FSM writes Unalert Range on each
+        // contact, including another player's Exit. Refresh at the decision,
+        // retaining the original sensor geometry and native bool/event logic.
+        var sensor = action.Owner.transform.Find(child);
+        bool occupied;
+        if (!sensor || !Occupied(sensor.gameObject, out occupied)) return false;
+        action.boolVariable.Value = occupied;
+        return true;
+    }
+
+    private static void BoolEnter(On.HutongGames.PlayMaker.Actions.BoolTest.orig_OnEnter orig, BoolTest action)
+    {
+        RefreshBool(action);
+        orig(action);
+    }
+
+    private static void BoolUpdate(On.HutongGames.PlayMaker.Actions.BoolTest.orig_OnUpdate orig, BoolTest action)
+    {
+        RefreshBool(action);
+        orig(action);
+    }
+
     internal static bool BlockFar(Fsm fsm, FsmEvent evt)
     {
         if (evt == null || evt.Name != "FAR" || !Blocker(fsm) || fsm.ActiveState == null || fsm.ActiveState.Name != "Closed" || fsm.ActiveState.Actions == null) return false;
         foreach (var action in fsm.ActiveState.Actions)
         {
+            var boolean = action as BoolTest;
+            if (boolean != null && boolean.Enabled && (IsFar(boolean.isTrue) || IsFar(boolean.isFalse)) && RefreshBool(boolean))
+                return !IsFar(boolean.boolVariable.Value ? boolean.isTrue : boolean.isFalse);
             var comparison = action as FloatCompare;
             if (comparison == null || !comparison.Enabled || !Refresh(comparison)) continue;
             if (!IsFar(comparison.equal) && !IsFar(comparison.lessThan) && !IsFar(comparison.greaterThan)) continue;
@@ -161,7 +201,7 @@ internal static class ElderBaldurRange
 
     private static bool IsFar(FsmEvent evt) { return evt != null && evt.Name == "FAR"; }
 
-    private static bool Occupied(AlertRange range, out bool occupied)
+    private static bool Occupied(GameObject range, out bool occupied)
     {
         occupied = false;
         if (!range) return false;
@@ -172,15 +212,16 @@ internal static class ElderBaldurRange
         {
             if (!Eligible(player)) continue;
             Collider2D[] body;
-            // Root body colliders only: nail/spell/summon colliders are not heroes.
-            if (!bodies.TryGetValue(player.Hero, out body)) bodies[player.Hero] = body = player.Hero.GetComponents<Collider2D>();
+            // Native HeroBox also participates in detection. Owned attacks and
+            // summons are not body colliders, even underneath the hero root.
+            if (!bodies.TryGetValue(player.Hero, out body)) bodies[player.Hero] = body = ColliderGeometry.HeroBodies(player.Hero);
             foreach (var sensor in colliders)
             {
                 if (!sensor || !sensor.enabled || !sensor.gameObject.activeInHierarchy) continue;
                 foreach (var collider in body)
                 {
-                    if (!collider || !collider.enabled || !collider.gameObject.activeInHierarchy || !sensor.bounds.Intersects(collider.bounds)) continue;
-                    if (sensor.Distance(collider).isOverlapped) { occupied = true; return true; }
+                    if (!collider || !collider.enabled || !collider.gameObject.activeInHierarchy) continue;
+                    if (ColliderGeometry.Overlaps(sensor, collider)) { occupied = true; return true; }
                 }
             }
         }
@@ -190,16 +231,18 @@ internal static class ElderBaldurRange
     private static void Alert(On.CheckAlertRange.orig_Apply orig, CheckAlertRange action)
     {
         bool occupied;
+        var range = action.alertRange == null ? null : action.alertRange.Value as AlertRange;
         if (Blocker(action.Fsm) && action.storeResult != null && action.alertRange != null
-            && Occupied(action.alertRange.Value as AlertRange, out occupied)) action.storeResult.Value = occupied;
+            && range && Occupied(range.gameObject, out occupied)) action.storeResult.Value = occupied;
         else orig(action);
     }
 
     private static void NamedAlert(On.CheckAlertRangeByName.orig_Apply orig, CheckAlertRangeByName action)
     {
         bool occupied;
+        var range = Blocker(action.Fsm) ? AlertRange.Find(action.Owner, action.childName) : null;
         if (Blocker(action.Fsm) && action.storeResult != null
-            && Occupied(AlertRange.Find(action.Owner, action.childName), out occupied)) action.storeResult.Value = occupied;
+            && range && Occupied(range.gameObject, out occupied)) action.storeResult.Value = occupied;
         else orig(action);
     }
 }

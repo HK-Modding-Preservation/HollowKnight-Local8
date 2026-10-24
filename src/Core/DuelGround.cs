@@ -13,8 +13,9 @@ internal static class DuelGround
 		BoxCollider2D component = p.Hero.GetComponent<BoxCollider2D>();
 		if ((bool)component)
 		{
-			Vector3 lossyScale = component.transform.lossyScale;
-			return new Bounds(component.transform.TransformPoint(component.offset), new Vector3(Mathf.Abs(component.size.x * lossyScale.x), Mathf.Abs(component.size.y * lossyScale.y), 0.1f));
+			Vector3 horizontal = component.transform.TransformVector(new Vector3(component.size.x, 0, 0));
+			Vector3 vertical = component.transform.TransformVector(new Vector3(0, component.size.y, 0));
+			return new Bounds(component.transform.TransformPoint(component.offset), new Vector3(Mathf.Abs(horizontal.x) + Mathf.Abs(vertical.x), Mathf.Abs(horizontal.y) + Mathf.Abs(vertical.y), 0.1f));
 		}
 		Collider2D component2 = p.Hero.GetComponent<Collider2D>();
 		if ((bool)component2 && component2.enabled && component2.bounds.size.y > 0.1f)
@@ -30,6 +31,12 @@ internal static class DuelGround
 		{
 			return false;
 		}
+		return Supported(at, offset, size, out reason);
+	}
+
+	internal static bool Supported(Vector3 at, Vector3 offset, Vector3 size, out string reason)
+	{
+		reason = "";
 		Vector2 vector = at + offset;
 		bool flag = false;
 		float num = vector.y - size.y * 0.5f;
@@ -39,10 +46,11 @@ internal static class DuelGround
 			{
 				break;
 			}
-			int num2 = Physics2D.RaycastNonAlloc(new Vector2(vector.x + (float)i * size.x * 0.25f, num + 0.15f), Vector2.down, floorHits, 0.65f, 256);
+			int num2 = Physics2D.RaycastNonAlloc(new Vector2(vector.x + (float)i * size.x * 0.25f, num + 0.15f), Vector2.down, floorHits, 0.65f, (1 << 8) | (1 << 25));
+			if (num2 == floorHits.Length) { reason = "suelo demasiado ocupado"; return false; }
 			for (int j = 0; j < num2; j++)
 			{
-				if ((bool)floorHits[j].collider && !floorHits[j].collider.isTrigger && floorHits[j].normal.y > 0.45f)
+				if (SpawnSafety.Solid(floorHits[j].collider) && floorHits[j].normal.y > 0.45f)
 				{
 					flag = true;
 					break;
@@ -70,8 +78,9 @@ internal static class DuelGround
 	private static bool ClearBody(PlayerSlot p, Vector3 at, Vector3 offset, Vector3 size, bool arena, out string reason)
 	{
 		reason = "";
+		if (!SpawnSafety.BodyInside(at, offset, size)) { reason = "fuera de escena"; return false; }
 		Vector2 point = at + offset;
-		Vector2 size2 = new Vector2(Mathf.Max(0.1f, size.x - 0.14f), Mathf.Max(0.1f, size.y - 0.16f));
+		Vector2 size2 = SpawnSafety.Clearance(size);
 		int num = Physics2D.OverlapBoxNonAlloc(point, size2, 0f, hits);
 		if (num == hits.Length)
 		{

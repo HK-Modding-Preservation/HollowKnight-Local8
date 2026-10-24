@@ -19,18 +19,11 @@ internal static class PrimaryController
     {
         if (preference == "Keyboard") return InputDevice.Null;
         if (preference != Automatic) return Controls.Find(preference, devices);
-        InputDevice first = null;
         foreach (InputDevice device in devices)
         {
             if (device == null || device == InputDevice.Null || !device.IsAttached || device.Passive) continue;
             if (device == active) return device;
-            if (first == null) first = device;
         }
-        return first ?? InputDevice.Null;
-    }
-
-    internal static bool ClaimFirstJoin(string preference, int players, InputDevice primary)
-    {
-        return preference == Automatic && players == 1 && Controls.IsKeyboard(primary);
+        return InputDevice.Null;
     }
 }

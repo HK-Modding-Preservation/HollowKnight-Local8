@@ -24,7 +24,7 @@ internal static class JoinHint {
   return true;
  }
  internal static void Tick(Local8Runtime runtime){
-  Hide();if(shown||runtime==null||!runtime.Enabled.Value||runtime.Panel)return;
+  Hide();if(CoopSetupHint.Pending||shown||runtime==null||!runtime.Enabled.Value||runtime.Panel)return;
   CoopSession session=runtime.Session;GameManager gm=GameManager.instance;
   if(session!=null&&session.Players.Count>1){shown=true;Hide();return;}
   if(session==null||gm==null||!session.Gameplay||!session.CanJoin||session.Primary==null||!session.Primary.Ready||session.Players.Count!=1||gm.isPaused||Charms.NativeMenuOpen||ScriptedParty.Active||PickupCard.Owner!=null||ShopMenuRouting.Buyer!=null||StagMenuRouting.HasOwner||InteractionRouter.ActivePlayer!=null||UIManager.instance==null||(int)UIManager.instance.uiState!=4)return;

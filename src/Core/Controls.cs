@@ -86,7 +86,9 @@ internal static class Controls
 	{
 		if (!IsVJoy(d))
 		{
-			return d.Name;
+			var same = Devices().Where(item => item.Name == d.Name).ToArray();
+			int index = Array.IndexOf(same, d);
+			return same.Length > 1 && index >= 0 ? d.Name + " #" + (index + 1) : d.Name;
 		}
 		return "vJoy " + VirtualIndex(d) + " (DirectInput)";
 	}
@@ -285,9 +287,14 @@ internal static class Controls
 		if (exact != null) return exact;
 		// Upgrade pre-v0.11.1 GUID|name|ordinal preferences without requiring a reset.
 		int first = key.IndexOf('|'), last = key.LastIndexOf('|');
-		if (first != 32 || last <= first || !Guid.TryParseExact(key.Substring(0, first), "N", out _) ||
+		if (first != 32 || last <= first || !Guid.TryParseExact(key.Substring(0, first), "N", out Guid guid) ||
 			!int.TryParse(key.Substring(last + 1), out int ordinal) || ordinal < 0) return null;
 		string name = key.Substring(first + 1, last - first - 1);
+		// Native InControl can reattach the same object at a different list index.
+		// Its GUID still identifies it within the session; the ordinal is only a
+		// compatibility fallback for preferences from an earlier process.
+		InputDevice sameObject = available.FirstOrDefault(d => d.GUID == guid && d.Name == name);
+		if (sameObject != null) return sameObject;
 		return available.Where(d => d.Name == name).ElementAtOrDefault(ordinal);
 	}
 
@@ -314,51 +321,25 @@ internal static class Controls
 
 	internal static void InitPrimary(PlayerSlot slot, HeroActions vanilla, InputDevice device)
 	{
+		slot.KeyboardProfile = 0;
 		slot.Actions = CreateFiltered(vanilla, IsKeyboard(device), device);
 		slot.OwnsActions = true;
 		Bind(slot, device);
 	}
 
-	internal static void InitSecondary(PlayerSlot slot, HeroActions vanilla, InputDevice device)
+	internal static void InitSecondary(PlayerSlot slot, HeroActions vanilla, InputDevice device, HashSet<int> reservedProfiles = null, bool restoreSaved = true)
 	{
 		slot.Actions = CreateFiltered(vanilla, IsKeyboard(device), device);
 		slot.OwnsActions = true;
 		Bind(slot, device);
 		if (device == InputDevice.Null)
 		{
-			int num = 0;
-			if (slot.Index > 0 && IsKeyboard(Local8Runtime.Self.Session.Players[0].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 1 && IsKeyboard(Local8Runtime.Self.Session.Players[1].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 2 && IsKeyboard(Local8Runtime.Self.Session.Players[2].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 3 && IsKeyboard(Local8Runtime.Self.Session.Players[3].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 4 && IsKeyboard(Local8Runtime.Self.Session.Players[4].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 5 && IsKeyboard(Local8Runtime.Self.Session.Players[5].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 6 && IsKeyboard(Local8Runtime.Self.Session.Players[6].Device))
-			{
-				num++;
-			}
-			if (slot.Index > 7 && IsKeyboard(Local8Runtime.Self.Session.Players[7].Device))
-			{
-				num++;
-			}
+			var used = reservedProfiles ?? new HashSet<int>(Local8Runtime.Self.Session.Players
+				.Where(p => p.Index != slot.Index && IsKeyboard(p.Device)).Select(p => p.KeyboardProfile));
+			int num = slot.KeyboardProfile;
+			if (num < 0 || num > 3 || used.Contains(num)) num = Enumerable.Range(0, 4).Where(i => !used.Contains(i)).DefaultIfEmpty(-1).First();
+			if (num < 0) throw new InvalidOperationException("No free keyboard profile");
+			slot.KeyboardProfile = num;
 			switch (num)
 			{
 			case 0:
@@ -540,30 +521,87 @@ internal static class Controls
 			}
 		}
 		KeypadInput.Defaults(slot);
-		KeyboardMemory.Restore(slot);
+		if (restoreSaved) KeyboardMemory.Restore(slot);
 		KeypadInput.RepairMenus(slot);
+	}
+
+	internal static bool ResetKeyboard(PlayerSlot slot, HeroActions vanilla)
+	{
+		if (slot == null || slot.Index <= 0 || slot.Actions == null || !IsKeyboard(slot.Device)) return false;
+		var defaults = new PlayerSlot { Index = slot.Index, KeyboardProfile = slot.KeyboardProfile };
+		try
+		{
+			InitSecondary(defaults, vanilla, InputDevice.Null, null, restoreSaved: false);
+			// Load into the same action objects, keeping native/menu references valid.
+			if (!KeyboardBindingData.TryLoad(slot.Actions, defaults.Actions.Save())) return false;
+			KeyboardMemory.Save(slot);
+			return true;
+		}
+		catch (Exception error) { Diagnostics.Throttled("KEYBOARD reset", error); return false; }
+		finally { Dispose(defaults); }
 	}
 
 	internal static void RebindPrimary(PlayerSlot slot, HeroActions vanilla, InputDevice device)
 	{
-		if (slot.Index > 0)
+		// Secondary keyboard bindings belong to that player, including defaults.
+		if (slot.Index > 0 && IsKeyboard(slot.Device) && IsKeyboard(device) && slot.Actions != null) return;
+		var prepared = Prepare(slot, vanilla, device, null);
+		if (slot.Actions != null && slot.Device == prepared.Device && Signature(slot.Actions) == Signature(prepared.Actions))
 		{
-			if (!IsKeyboard(slot.Device) || slot.Actions == null)
-			{
-				Dispose(slot);
-				InitSecondary(slot, vanilla, device);
-			}
+			Dispose(prepared);
+			Bind(slot, device);
+			return;
 		}
-		else
+		// Prepare first. A failed rebuild must not destroy the working controls.
+		var previous = Commit(slot, prepared);
+		if (previous != null) previous.Destroy();
+	}
+
+	internal static void Swap(PlayerSlot primary, PlayerSlot other, HeroActions vanilla, InputDevice device)
+	{
+		var used = new HashSet<int>(Local8Runtime.Self.Session.Players.Where(p => p != primary && p != other && IsKeyboard(p.Device)).Select(p => p.KeyboardProfile));
+		if (IsKeyboard(device)) used.Add(0);
+		PlayerSlot first = null, second = null;
+		try
 		{
-			Dispose(slot);
-			InitPrimary(slot, vanilla, device);
+			first = Prepare(primary, vanilla, device, used);
+			second = Prepare(other, vanilla, primary.Device ?? InputDevice.Null, used);
 		}
+		catch { if (first != null) Dispose(first); if (second != null) Dispose(second); throw; }
+		var oldFirst = Commit(primary, first);
+		var oldSecond = Commit(other, second);
+		if (oldFirst != null) oldFirst.Destroy();
+		if (oldSecond != null) oldSecond.Destroy();
+	}
+
+	private static PlayerSlot Prepare(PlayerSlot slot, HeroActions vanilla, InputDevice device, HashSet<int> reserved)
+	{
+		var prepared = new PlayerSlot { Index = slot.Index, KeyboardProfile = slot.KeyboardProfile };
+		try
+		{
+			if (slot.Index == 0) InitPrimary(prepared, vanilla, device);
+			else InitSecondary(prepared, vanilla, device, reserved);
+			return prepared;
+		}
+		catch { Dispose(prepared); throw; }
+	}
+
+	private static HeroActions Commit(PlayerSlot slot, PlayerSlot prepared)
+	{
+		HeroActions previous = slot.OwnsActions ? slot.Actions : null;
+		slot.Actions = prepared.Actions; slot.OwnsActions = prepared.OwnsActions;
+		slot.Device = prepared.Device; slot.DeviceKey = prepared.DeviceKey;
+		slot.DeviceName = prepared.DeviceName; slot.Connected = prepared.Connected;
+		slot.KeyboardProfile = prepared.KeyboardProfile;
+		prepared.Actions = null; prepared.OwnsActions = false;
+		return previous;
 	}
 
 	private static HeroActions CreateFiltered(HeroActions source, bool keyboard, InputDevice selected)
 	{
 		HeroActions heroActions = new HeroActions();
+		try
+		{
 		foreach (PlayerAction action in source.Actions)
 		{
 			PlayerAction playerActionByName = heroActions.GetPlayerActionByName(action.Name);
@@ -650,6 +688,8 @@ internal static class Controls
 			return heroActions;
 		}
 		return heroActions;
+		}
+		catch { heroActions.Destroy(); throw; }
 	}
 
 	private static void MapVirtual(HeroActions a, InputDevice d)

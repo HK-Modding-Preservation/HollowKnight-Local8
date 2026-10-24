@@ -11,7 +11,7 @@ internal static class PerformanceMenu
     {
         var o = runtime.Performance;
         if (o == null) return;
-        int players = runtime.Session == null ? 0 : runtime.Session.Players.Count;
+        int players = PerformancePresets.PlayerCount(runtime);
         MenuTheme.Section(UiLocalization.Get("performance.title"), width, ref row);
         float toggleHeight = ToggleHeight(width, Text("automatic"));
         if (MenuTheme.Toggle(new Rect(5, row, width - 10, toggleHeight), Text("automatic"), o.Automatic, Text("automatic_tip")))
@@ -49,6 +49,14 @@ internal static class PerformanceMenu
             PerformancePresets.Customize(runtime);
             runtime.ReduceHitEffects.Value = !runtime.ReduceHitEffects.Value;
         }
+        row += toggleHeight + 7;
+        toggleHeight = ToggleHeight(width, Text("hazard_effects"));
+        if (MenuTheme.Toggle(new Rect(5, row, width - 10, toggleHeight), Text("hazard_effects"), o.HazardEffects, Text("hazard_effects_tip")))
+            o.HazardEffects = !o.HazardEffects;
+        row += toggleHeight + 7;
+        toggleHeight = ToggleHeight(width, Text("health_effects"));
+        if (MenuTheme.Toggle(new Rect(5, row, width - 10, toggleHeight), Text("health_effects"), o.HudHealthEffects, Text("health_effects_tip")))
+            o.HudHealthEffects = !o.HudHealthEffects;
         row += toggleHeight + 7;
         var gm = GameManager.instance;
         if (gm && gm.gameSettings != null)

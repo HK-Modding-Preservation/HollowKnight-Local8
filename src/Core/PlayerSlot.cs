@@ -18,6 +18,7 @@ internal sealed class PlayerSlot
 	internal HeroActions Actions;
 
 	internal bool OwnsActions;
+	internal int KeyboardProfile = -1;
 
 	internal bool InputBlocked;
 
@@ -126,6 +127,8 @@ internal sealed class PlayerSlot
 	internal float FocusHeld;
 
 	internal float HealFlashUntil;
+
+	internal readonly HealthChangeFeedback HudHealth = new HealthChangeFeedback();
 
 	internal PlayerSlot ReviveTarget;
 

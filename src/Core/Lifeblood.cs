@@ -42,6 +42,49 @@ internal static class Lifeblood
 	private static readonly Dictionary<int, PlayerSlot> killers = new Dictionary<int, PlayerSlot>();
 
 	private static readonly Dictionary<int, float> awarded = new Dictionary<int, float>();
+	private static readonly HashSet<int> shared = new HashSet<int>();
+	internal const float ShareRadius = 12f;
+	private static bool installed;
+
+	internal static void Install()
+	{
+		if (installed) return;
+		installed = true;
+		On.HealthManager.OnEnable += Enabled;
+		LifebloodScuttlers.Install();
+	}
+
+	internal static void Uninstall()
+	{
+		if (!installed) return;
+		installed = false;
+		On.HealthManager.OnEnable -= Enabled;
+		LifebloodScuttlers.Uninstall();
+		Reset();
+	}
+
+	private static void Enabled(On.HealthManager.orig_OnEnable orig, HealthManager self)
+	{
+		if (IsBug(self.gameObject))
+		{
+			int id = self.gameObject.GetInstanceID();
+			shared.Remove(id);
+			awarded.Remove(id);
+			killers.Remove(id);
+			collectors.Remove(id);
+		}
+		orig(self);
+	}
+
+	private static bool IsBug(GameObject go)
+	{
+		if (!go) return false;
+		string n = go.name;
+		return n.IndexOf("health scuttler", StringComparison.OrdinalIgnoreCase) >= 0
+			|| n.IndexOf("healthscuttler", StringComparison.OrdinalIgnoreCase) >= 0
+			|| n.IndexOf("life seed", StringComparison.OrdinalIgnoreCase) >= 0
+			|| n.IndexOf("lifeseed", StringComparison.OrdinalIgnoreCase) >= 0;
+	}
 
 	private static readonly Dictionary<int, Pickup> collectors = new Dictionary<int, Pickup>();
 
@@ -210,30 +253,67 @@ internal static class Lifeblood
 			return false;
 		}
 		int instanceID = source.GetInstanceID();
+		CoopSession session = Plugin.Self.Session;
+		if (IsBug(source))
+		{
+			// A broadcast may visit every hero FSM over several frames. Consume
+			// once for this bug's lifetime; OnEnable resets a pooled bug.
+			if (!shared.Add(instanceID)) return true;
+			Share(session, source);
+			return true;
+		}
 		if (awarded.TryGetValue(instanceID, out var value) && Time.unscaledTime - value < 0.25f)
 		{
 			return true;
 		}
-		CoopSession session = Plugin.Self.Session;
 		PlayerSlot playerSlot = Collector(source) ?? Killer(source);
 		if (playerSlot == null)
 		{
 			return false;
 		}
 		awarded[instanceID] = Time.unscaledTime;
+		Give(session, playerSlot);
+		return true;
+	}
+
+	internal static void NativeBug(CoopSession session, GameObject bug)
+	{
+		// Called only when native ScuttlerControl.Hit starts its Heal routine.
+		// This is a new accepted lifetime, including a rearmed pooled scuttler.
+		shared.Add(bug.GetInstanceID());
+		using (new Scope(bug)) Share(session, bug);
+	}
+
+	private static void Share(CoopSession session, GameObject bug)
+	{
+		Vector3 at = bug.transform.position;
+		int count = 0;
+		foreach (var p in session.Players)
+		{
+			if (!WorldContactRouting.Eligible(p) || p.Vitals.Health <= 0 || TransitionVote.Holding(p)
+				|| Vector2.Distance(at, p.Hero.transform.position) > ShareRadius) continue;
+			Give(session, p);
+			count++;
+		}
+		Diagnostics.Write("LIFEBLOOD shared source=" + bug.name + " nearby=" + count + " radius=" + ShareRadius);
+	}
+
+	private static void Give(CoopSession session, PlayerSlot playerSlot)
+	{
 		using (PlayerContext.Enter(playerSlot))
 		{
 			session.Data.healthBlue++;
 		}
 		playerSlot.HealFlashUntil = Time.unscaledTime + 0.45f;
 		Diagnostics.Write("LIFEBLOOD awarded P" + (playerSlot.Index + 1) + " source=" + source.name);
-		return true;
 	}
 
 	internal static void Reset()
 	{
+		LifebloodScuttlers.Reset();
 		killers.Clear();
 		awarded.Clear();
+		shared.Clear();
 		collectors.Clear();
 		pickupFsms.Clear();
 		recent.Clear();

@@ -36,10 +36,10 @@ clock=method((root/'src/Features/PvpRoundClock.cs').read_text().replace(' intern
 with tempfile.TemporaryDirectory(prefix='hk8-menu-ui-') as folder:
     out=Path(folder)
     (out/'MenuHost.cs').write_text('using System;using System.Linq;using InControl;using UnityEngine;namespace KO.HollowKnight8 {internal static class Hud{'+fields+'\n'.join(method(hud,n) for n in names)+'} internal static class PvpRoundClock{'+clock+'}}')
-    production=['Features/MenuLayout.cs','Features/MenuTheme.cs','Features/MenuArt.cs','Features/PvpArenaUI.cs','Features/RespawnSlider.cs','Features/KeyboardWarning.cs','Features/RoleDefinition.cs','Features/UiLocalization.cs','Core/ReleaseInfo.cs','Features/PlayerProfileData.cs','Features/PlayerProfilesUI.cs','Features/AdventureStatsUI.cs','Features/PerformanceMenu.cs','Core/PerformanceConfiguration.cs','Core/PerformancePresets.cs','Core/NativeGraphicsOptions.cs']
+    production=['Features/MenuLayout.cs','Features/MenuTheme.cs','Features/MenuArt.cs','Features/PvpArenaUI.cs','Features/RespawnSlider.cs','Features/KeyboardWarning.cs','Features/RoleDefinition.cs','Features/UiLocalization.cs','Core/ReleaseInfo.cs','Features/PlayerProfileData.cs','Features/PlayerProfilesUI.cs','Features/AdventureStatsUI.cs','Features/PerformanceMenu.cs','Core/PerformanceConfiguration.cs','Core/PerformancePresets.cs','Core/NativeGraphicsOptions.cs','Core/LobbyRoster.cs','Features/TitleLobby.cs','Features/LobbyMenuInput.cs','Features/DlcBadgePlacement.cs']
     options=['-nologo','-target:exe','-langversion:latest','-optimize+','-out:'+str(out/'Test.dll')]
     options+=['-r:'+str(p) for p in refs.glob('*.dll')]
-    options+=[str(here/'Doubles.cs'),str(here/'Test.cs'),str(out/'MenuHost.cs')]+[str(root/'src'/p) for p in production]
+    options+=[str(here/'Doubles.cs'),str(here/'Test.cs'),str(here/'LobbyTest.cs'),str(out/'MenuHost.cs')]+[str(root/'src'/p) for p in production]
     options+=['-resource:'+str(root/'assets'/n)+','+n for n in ['Local8.UI.Text','Local8.Roles.Text','Local8.UI.Atlas']]
     (out/'test.rsp').write_text('\n'.join('"'+s+'"' for s in options))
     (out/'Test.runtimeconfig.json').write_text(json.dumps({'runtimeOptions':{'tfm':refs.name,'framework':{'name':'Microsoft.NETCore.App','version':framework.name}}}))

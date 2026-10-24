@@ -11,7 +11,9 @@ internal static class ArenaLanding
 		reason = "fuera de escena";
 		if (s.InRoom(at) && ArenaGather.Allows(at))
 		{
-			return DuelGround.ClearArena(p, at, out reason);
+			Bounds body = DuelGround.Body(p);
+			return DuelGround.ClearArena(p, at, out reason)
+				&& DuelGround.Supported(at, body.center - p.Hero.transform.position, body.size, out reason);
 		}
 		return false;
 	}
@@ -48,12 +50,13 @@ internal static class ArenaLanding
 			{
 				Vector2 origin2 = new Vector2(origin.x + (float)(i * j), origin.y + 3f);
 				int num2 = Physics2D.RaycastNonAlloc(origin2, Vector2.down, floors, 16f, 33554688);
+				if (num2 == floors.Length) continue;
 				float num3 = float.MaxValue;
 				RaycastHit2D raycastHit2D = default(RaycastHit2D);
 				for (int k = 0; k < num2; k++)
 				{
 					RaycastHit2D raycastHit2D2 = floors[k];
-					if ((bool)raycastHit2D2.collider && !raycastHit2D2.collider.isTrigger && !(raycastHit2D2.normal.y < 0.6f) && !(raycastHit2D2.distance >= num3))
+					if (SpawnSafety.Solid(raycastHit2D2.collider) && !(raycastHit2D2.normal.y < 0.6f) && !(raycastHit2D2.distance >= num3))
 					{
 						num3 = raycastHit2D2.distance;
 						raycastHit2D = raycastHit2D2;

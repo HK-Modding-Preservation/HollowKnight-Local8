@@ -1,26 +1,33 @@
-# Publishing Hollow Knight 8-Player Co-op v0.11.0
+# Publishing Hollow Knight 8-Player Co-op v0.11.2
 
-These files are prepared for publication; preparation does not publish a release or update a PR.
+The publication wording was reviewed and approved by the user. The release
+and ModLinks PR omit the repeated AI-assisted footer; the README retains the
+development disclosure.
 
-## Repository
+After approval, publish the complete source while preserving history, license,
+identity and settings/save keys. Exclude game libraries, SDK files, logs, local
+reference configuration and compiler intermediates.
 
-Use the complete **HollowKnightLocal8-source-v0.11.0.zip** to replace the old source/project/docs tree. Remove obsolete source files before copying the new `src/Core/` and `src/Features/` structure, so duplicate class definitions are not retained. Keep existing Git history, repository settings and any license. Do not add game libraries or compiler output.
+GitHub:
 
-The source package is the exact tree used for the release DLL. Follow [building](BUILDING.md) for reproducible compilation.
+- Tag: v0.11.2. Title: Hollow Knight 8-Player Co-op v0.11.2.
+- Body: docs/RELEASE_NOTES_v0.11.2.md.
+- Asset: HollowKnightLocal8-v0.11.2.zip, containing only HollowKnightLocal8.dll.
+- Runtime: 0.11.2. Assembly/file: 0.11.2.0.
+- Exact checksums: release/SHA256SUMS.txt. Upload the prepared ZIP unchanged.
 
-## GitHub Release
+Before ModLinks, verify the public uploaded ZIP digest and confirm manual
+installation on the target game/API. Native validation limits and the known
+Custom Knight cosmetic limitation are documented in validation/compatibility.
 
-- Tag: **v0.11.0**
-- Title: **Hollow Knight 8-Player Co-op v0.11.0**
-- Installation asset: **HollowKnightLocal8-v0.11.0.zip**
-- Release body: [RELEASE_NOTES_v0.11.0.md](RELEASE_NOTES_v0.11.0.md)
+ModLinks/Lumafly:
 
-Upload the supplied ZIP unchanged. It contains only `HollowKnightLocal8.dll`. The SHA-256 in `release/SHA256SUMS.txt` and `release/ModLinks-v0.11.0.xml` is for that exact ZIP. Repacking it changes its checksum. Do not upload the source ZIP as the Lumafly installation asset; source belongs in the repository.
+- Recheck upstream before applying release/ModLinks-v0.11.2.patch.
+- The prepared entry is release/ModLinks-v0.11.2.xml.
+- Reviewed title/body: release/ModLinks-v0.11.2-PR.md.
+- Change only version, release ZIP URL and SHA-256.
+- Preserve the existing name, other URLs, Custom Knight integration,
+  Gameplay/LLM-Assisted tags, author and empty mandatory dependencies.
+- Public source/release must exist before submitting the catalog request.
 
-## ModLinks / Lumafly
-
-Use the prepared manifest in `release/ModLinks-v0.11.0.xml` to open a new update PR against the existing catalog entry after the release asset and source are available.
-
-Name/DisplayName: **Hollow Knight 8-Player Co-op**. Version: **0.11.0.0**. Preserve repository, README and issue URLs, optional Custom Knight integration, Gameplay and LLM-Assisted tags, and author RaulSB-code. No mandatory mod dependency has been added.
-
-Before submitting, confirm the uploaded asset's digest still matches the prepared checksum and that manual installation works on the target game/API.
+Preparation does not push a branch, publish a release or create a PR.

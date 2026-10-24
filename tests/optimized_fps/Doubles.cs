@@ -19,7 +19,7 @@ namespace UnityEngine {
  }
  internal class MonoBehaviour:Component{}
  internal class GameObject:Object {
-  internal string name="Object"; internal readonly Transform Node; internal readonly List<Component> Components=new();
+  internal string name="Object";internal bool activeInHierarchy=true; internal readonly Transform Node; internal readonly List<Component> Components=new();
   internal Transform transform{get{TransformReads++;return Node;}}
   internal GameObject(Transform parent=null){Node=new Transform{gameObject=this,parent=parent};Components.Add(Node);if(parent!=null)parent.Children.Add(Node);}
   internal T AddComponent<T>()where T:Component,new(){var c=new T{gameObject=this};Components.Add(c);return c;}
@@ -53,13 +53,17 @@ namespace HutongGames.PlayMaker {
  internal class FsmStateAction{internal Fsm Fsm;}
 }
 namespace KO.HollowKnight8 {
- internal class HeroController:UnityEngine.MonoBehaviour{}
+ internal class HeroController:UnityEngine.MonoBehaviour{internal bool controlReqlinquished;}
+ internal class Vitals{internal bool AtBench;}
+ internal class PlayMakerFSM:UnityEngine.Component{internal bool isActiveAndEnabled=true;internal string ActiveStateName;}
+ internal class GameManager:UnityEngine.Object{internal static GameManager instance;internal PlayMakerFSM inventoryFSM;}
+ internal static class BenchSeats{internal static bool Seated(PlayerSlot p)=>p.SeatOccupied;}
  internal class OwnerTag:UnityEngine.MonoBehaviour{internal PlayerSlot Player;}
  internal class Button{internal bool IsPressed,WasPressed;}
  internal class Actions{internal readonly Button up=new(),down=new();}
  internal class PlayerSlot{
   internal int Index;internal HeroController Hero;internal bool Retiring,Valid=true,Eligible=true,Inside=true,Seat=true,Competing,BlockExit;
-  internal Actions Actions=new();
+  internal Actions Actions=new();internal Vitals Vitals=new();internal bool SeatOccupied;
  }
  internal static class PvpCombat{internal static void Track(UnityEngine.GameObject root,PlayerSlot p,bool reset){}}
  internal static class Plugin{internal static readonly Runtime Self=new();}

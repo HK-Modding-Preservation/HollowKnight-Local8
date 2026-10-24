@@ -54,15 +54,18 @@ namespace On {
  }
 }
 namespace KO.HollowKnight8 {
+ internal static class PrimaryController {internal const string Automatic="Auto";}
  internal sealed class Setting<T>{internal T Value;internal Setting(T value){Value=value;}}
  internal class PlayerSlot {public bool Alive=true;public int Health=5,Role=4;public string Skin="CustomKnight";public int[] Charms={1,6,40,81};}
  internal class CoopSession {internal bool Active=true;internal readonly List<PlayerSlot> Players=new();}
  internal class Local8Runtime:UnityEngine.Object {
+  internal LobbyRoster Lobby=new();
   internal PerformanceConfiguration Performance=new();internal CoopSession Session=new();
   internal Setting<bool> Enabled=new(true),PerformanceMode=new(false),ReduceHitEffects=new(true);internal int Exports;
   internal void ExportSettings(){Exports++;}
  }
  internal static class Plugin {internal static Local8Runtime Self;}
+ internal class LobbyRoster {internal int Count;}
  internal static class NativeRenderBudget {internal static int Resets;internal static void Reset(){Resets++;}}
  internal static class Diagnostics {internal static readonly List<string> Messages=new();internal static void Write(string message)=>Messages.Add(message);internal static void Throttled(string key,Exception e)=>Messages.Add(key+": "+e.Message);}
  public class PlayerProfileData {}

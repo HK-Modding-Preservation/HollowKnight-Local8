@@ -203,6 +203,8 @@ internal static class Hud
 						player.DamageFlashUntil = Time.unscaledTime + 0.4f;
 					}
 					lastHealth[player.Index] = num2;
+					player.HudHealth.Observe(player.Vitals.Health, player.Vitals.Blue, player.CurrentMaxHealth,
+						Time.unscaledTime, plugin.Performance.HudHealthEffects);
 				}
 				if (plugin.BasicHud.Value || !HudAssets.Ready)
 				{
@@ -233,6 +235,7 @@ internal static class Hud
 			{
 				DrawMenu(plugin, w, h);
 			}
+			else TitleLobby.Entry(plugin, w, h);
 		}
 		finally
 		{
@@ -271,8 +274,7 @@ internal static class Hud
 		foreach (PlayerSlot player in session.Players)
 		{
 			Rect r = new Rect(num3 + (float)player.Index * (num + 7f), 12f, num, height);
-			bool flag = Time.unscaledTime < player.DamageFlashUntil;
-			Box(r, flag ? new Color(0.35f, 0.04f, 0.04f, 0.9f) : new Color(0.035f, 0.04f, 0.075f, 0.84f));
+			Box(r, new Color(0.035f, 0.04f, 0.075f, 0.84f));
 			Box(new Rect(r.x, r.y, 3f, r.height), player.Color);
 			GUI.Label(new Rect(r.x + 8f, r.y + 2f, r.width - 12f, 20f), "P" + (player.Index + 1) + " " + Status(player, plugin), new GUIStyle(small)
 			{
@@ -282,7 +284,14 @@ internal static class Hud
 					textColor = player.Color
 				}
 			});
-			GUI.Label(new Rect(r.x + 8f, r.y + 22f, r.width - 12f, 20f), UiLocalization.Get("hud.health") + Mathf.Max(0, player.Vitals.Health) + ((player.Vitals.Blue > 0) ? (" +" + player.Vitals.Blue) : "") + " / " + player.CurrentMaxHealth, small);
+			Color before = GUI.color;
+			try
+			{
+				float fade = player.HudHealth.Fade(Time.unscaledTime);
+				GUI.color = new Color(1f, 1f, 1f, 1f - .3f * fade);
+				GUI.Label(new Rect(r.x + 8f, r.y + 22f, r.width - 12f, 20f), UiLocalization.Get("hud.health") + Mathf.Max(0, player.Vitals.Health) + ((player.Vitals.Blue > 0) ? (" +" + player.Vitals.Blue) : "") + " / " + player.CurrentMaxHealth, small);
+			}
+			finally { GUI.color = before; }
 			Bar(new Rect(r.x + 8f, r.yMax - 6f, r.width - 16f, 3f), (float)player.Vitals.Soul / (float)Mathf.Max(1, player.Vitals.MaxSoul), player.Color);
 			if (player.ReviveProgress > 0f)
 			{
@@ -310,8 +319,6 @@ internal static class Hud
 			float num5 = num4 + (float)player.Index * (num2 + num3);
 			float num6 = 12f;
 			Color color = player.Color;
-			bool flag = Time.unscaledTime < player.DamageFlashUntil;
-			num5 += (flag ? (Mathf.Sin(Time.unscaledTime * 90f) * 2f * num) : 0f);
 			HudAssets.Images images = HudAssets.For(player);
 			Texture2D texture2D = ((images != null && (bool)images.Mask) ? images.Mask : HudAssets.Mask);
 			Texture2D texture = ((images != null && (bool)images.Soul) ? images.Soul : HudAssets.Soul);
@@ -346,23 +353,19 @@ internal static class Hud
 			}
 			int currentMaxHealth = player.CurrentMaxHealth;
 			int num8 = Mathf.Max(0, player.Vitals.Blue);
-			int num9 = currentMaxHealth + num8;
+			int num9 = Mathf.Max(currentMaxHealth + num8, player.HudHealth.Count(Time.unscaledTime));
 			int num10 = Mathf.Max(5, Mathf.Min(10, Mathf.CeilToInt((float)num9 / 2f)));
 			int b = Mathf.CeilToInt((float)num9 / (float)num10);
 			float num11 = Mathf.Min(29f * num, 58f * num / (float)Mathf.Max(2, b));
 			float num12 = Mathf.Min(27f * num, 180f * num / (float)num10);
 			for (int i = 0; i < num9; i++)
 			{
-				bool flag2 = i >= currentMaxHealth || i < player.Vitals.Health;
+				bool flag2 = i < player.Vitals.Health || i >= currentMaxHealth && i < currentMaxHealth + num8;
 				Color color2 = ((!flag2) ? new Color(0.2f, 0.22f, 0.28f, 0.85f) : ((i >= currentMaxHealth) ? new Color(0.45f, 0.85f, 1f) : color));
-				if (flag && flag2)
-				{
-					color2 = Color.Lerp(color2, Color.white, 0.75f);
-				}
 				Texture2D texture2 = texture2D;
 				if (images != null)
 				{
-					if (i >= currentMaxHealth && (bool)images.Blue)
+					if (flag2 && i >= currentMaxHealth && (bool)images.Blue)
 					{
 						texture2 = images.Blue;
 					}
@@ -371,21 +374,31 @@ internal static class Hud
 						texture2 = images.Empty;
 						color2 = color;
 					}
-					if (!flag2 && i == player.Vitals.Health && Time.unscaledTime - player.LastDamageAt < 0.6f)
-					{
-						Texture2D texture2D2 = images.Damage(Time.unscaledTime - player.LastDamageAt);
-						if ((bool)texture2D2)
-						{
-							texture2 = texture2D2;
-							color2 = color;
-						}
-					}
 				}
-				if (Time.unscaledTime < player.HealFlashUntil)
+				float fade = player.HudHealth.Fade(Time.unscaledTime);
+				bool gained = player.HudHealth.Gained(i) && fade > 0f;
+				if (gained)
 				{
-					color2 = Color.Lerp(color2, Color.white, 0.5f);
+					color2 = Color.Lerp(color2, Color.white, .45f * fade);
+					color2.a *= 1f - .35f * fade;
 				}
-				MaskDisplay.Icon(texture2, new Rect(num5 + 67f * num + (float)(i % num10) * num12, num6 + 23f * num + (float)(i / num10) * num11, num12 - 2f * num, num11 - 2f * num), color2, player);
+				Rect mask = new Rect(num5 + 67f * num + (float)(i % num10) * num12, num6 + 23f * num + (float)(i / num10) * num11, num12 - 2f * num, num11 - 2f * num);
+				// Retired blue/max-health cells disappear with their fading full mask.
+				if (i < currentMaxHealth + num8) MaskDisplay.Icon(texture2, mask, color2, player);
+				if (fade > 0f && player.HudHealth.Lost(i))
+				{
+					bool blue = i >= player.HudHealth.PreviousMaximum;
+					Texture2D previousMask = blue && images != null && images.Blue ? images.Blue : texture2D;
+					Color ghost = blue ? new Color(.45f, .85f, 1f) : color;
+					ghost.a = .85f * fade;
+					mask.y -= (1f - fade) * 2f * num;
+					MaskDisplay.Icon(previousMask, mask, ghost, player);
+				}
+				else if (gained)
+				{
+					float rim = 1.1f * num * fade;
+					MaskDisplay.Icon(texture2, new Rect(mask.x - rim, mask.y - rim, mask.width + rim * 2, mask.height + rim * 2), new Color(1f, 1f, 1f, .18f * fade), player);
+				}
 			}
 			if (player.Vitals.Reserve > 0)
 			{
@@ -469,7 +482,7 @@ internal static class Hud
 		{
 			s.Join(d2);
 		}
-		if (MenuTheme.Button(new Rect(right, row, width, 29f), Help(UiLocalization.Get("common.assign_p1"), UiLocalization.Get("input.assign_tip")), button))
+		if (MenuTheme.Choice(new Rect(right, row, width, 29f), Help(UiLocalization.Get("common.assign_p1"), UiLocalization.Get("input.assign_tip")), s.Primary.Device == d2))
 		{
 			s.AssignPrimary(d2);
 		}
@@ -493,10 +506,6 @@ internal static class Hud
 		MenuTheme.Centered(new Rect(x+78,y+56,width-156,20),ReleaseInfo.Version+"   ·   "+MenuInput.Label+UiLocalization.Get("panel.toggle_hint"),MenuTheme.Muted,12);
 		MenuTheme.HeaderArt(new Rect(x+width*.5f-180,y+73,360,42));
 		if(MenuTheme.IconButton(new Rect(x+width-65,y+24,34,34),MenuArt.Close,UiLocalization.Get("common.close")))plugin.SetPanel(false);
-		if(session.Primary==null)
-		{
-			MenuTheme.Text(new Rect(x+35,y+135,width-70,70),UiLocalization.Get("panel.enter_game"));return;
-		}
 		string[] tabs={UiLocalization.Get("tab.players"),UiLocalization.Get("tab.game"),"PvP",UiLocalization.Get("tab.settings")};
 		string[] tips={UiLocalization.Get("menu.players_tip"),UiLocalization.Get("menu.game_tip"),UiLocalization.Get("menu.pvp_tip"),UiLocalization.Get("menu.settings_tip")};
 		bool wide=MenuLayout.Wide(width);float side=MenuLayout.Sidebar(width);
@@ -506,7 +515,7 @@ internal static class Hud
 			Box(new Rect(x+16,y+MenuLayout.Header,side-12,height-MenuLayout.Header-MenuLayout.Footer),new Color(.023f,.028f,.042f,1));
 			for(int i=0;i<tabs.Length;i++)if(MenuTheme.Nav(new Rect(x+24,y+MenuLayout.Header+14+i*65,side-28,58),tabs[i],tips[i],i,tab==i||(tab==4&&i==0)))ChangeTab(i);
 			MenuTheme.Text(new Rect(x+30,y+height-MenuLayout.Footer-94,side-36,24),UiLocalization.Get("players.title"),MenuTheme.Muted,13);
-			MenuTheme.Text(new Rect(x+30,y+height-MenuLayout.Footer-67,side-36,25),session.Players.Count+" / 8",MenuTheme.Paper,20);
+			MenuTheme.Text(new Rect(x+30,y+height-MenuLayout.Footer-67,side-36,25),(session.Primary==null?plugin.Lobby.Count:session.Players.Count)+" / 8",MenuTheme.Paper,20);
 			foreach(PlayerSlot p in session.Players)MenuTheme.Mark(new Rect(x+30+p.Index*18,y+height-MenuLayout.Footer-29,12,16),p.Color);
 		}
 		else
@@ -532,14 +541,21 @@ internal static class Hud
 		float bottom=y+height-MenuLayout.Footer;
 		MenuTheme.Divider(new Rect(x+width*.5f-192,bottom-11,384,26));
 		float cell=(width-48)/4;
-		if(MenuTheme.Choice(new Rect(x+27.5f,bottom+14,cell-7,34),Help(MenuInput.Key==KeyCode.F9?UiLocalization.Get("action.join"):UiLocalization.Get("action.join_f9"),UiLocalization.Get("menu.join_tip")),true))session.JoinFirstAvailable();
-		if(MenuTheme.Button(new Rect(x+27.5f+cell,bottom+14,cell-7,34),Help(UiLocalization.Get("action.gather"),UiLocalization.Get("menu.gather_tip")),button))session.GatherNow();
-		if(MenuTheme.Button(new Rect(x+27.5f+cell*2,bottom+14,cell-7,34),Help(UiLocalization.Get("action.repair"),UiLocalization.Get("menu.repair_tip")),button))session.RepairPlayers();
+		if(MenuTheme.Choice(new Rect(x+27.5f,bottom+14,cell-7,34),Help(MenuInput.Key==KeyCode.F9?UiLocalization.Get("action.join"):UiLocalization.Get("action.join_f9"),UiLocalization.Get("menu.join_tip")),true))
+		{
+			if(session.Primary==null)plugin.Lobby.JoinFirstAvailable();else session.JoinFirstAvailable();
+		}
 		bool prior=GUI.enabled;
 		try
 		{
-			GUI.enabled=prior&&session.Players.Count>1;
-			if(MenuTheme.Button(new Rect(x+27.5f+cell*3,bottom+14,cell-7,34),Help(UiLocalization.Get("action.remove_last"),UiLocalization.Get("menu.remove_tip")),button))session.RemoveLast();
+			GUI.enabled=prior&&session.Primary!=null;
+			if(MenuTheme.Button(new Rect(x+27.5f+cell,bottom+14,cell-7,34),Help(UiLocalization.Get("action.gather"),UiLocalization.Get("menu.gather_tip")),button))session.GatherNow();
+			if(MenuTheme.Button(new Rect(x+27.5f+cell*2,bottom+14,cell-7,34),Help(UiLocalization.Get("action.repair"),UiLocalization.Get("menu.repair_tip")),button))session.RepairPlayers();
+			GUI.enabled=prior&&(session.Primary==null?plugin.Lobby.Count>0:session.Players.Count>1);
+			if(MenuTheme.Button(new Rect(x+27.5f+cell*3,bottom+14,cell-7,34),Help(UiLocalization.Get("action.remove_last"),UiLocalization.Get("menu.remove_tip")),button))
+			{
+				if(session.Primary==null)plugin.Lobby.RemoveLast();else session.RemoveLast();
+			}
 		}
 		finally{GUI.enabled=prior;}
 		MenuTheme.Centered(new Rect(x+76,bottom+55,width-152,26),Time.unscaledTime<plugin.MessageUntil?plugin.Message:UiLocalization.Get("menu.hover_hint"),MenuTheme.Muted,13);
@@ -547,11 +563,10 @@ internal static class Hud
 
 	private static void PlayerOptions(Local8Runtime plugin,CoopSession s,InputDevice[] devices,float cw,ref float row)
 	{
+		if(s.Primary==null){TitleLobby.Players(plugin,cw,ref row);return;}
 		MenuTheme.Section(UiLocalization.Get("input.p1_title"),cw,ref row,0);
-		MenuTheme.Text(new Rect(5,row,cw-10,28),"P1: "+s.Primary.DeviceName,MenuTheme.Paper,15);row+=34;
-		float inputCell=(cw-10)*.5f;
-		if(MenuTheme.Choice(new Rect(5,row,inputCell-4,35),Help(UiLocalization.Get("input.auto"),UiLocalization.Get("input.auto_tip")),plugin.PrimaryDevice.Value=="Auto"))s.AssignPrimaryAutomatic();
-		if(MenuTheme.Choice(new Rect(5+inputCell,row,inputCell-4,35),Help(UiLocalization.Get("input.keyboard"),UiLocalization.Get("input.keyboard_tip")),plugin.PrimaryDevice.Value=="Keyboard"))s.AssignPrimary(InputDevice.Null);
+		MenuTheme.Text(new Rect(5,row,cw-10,28),"P1: "+(Controls.IsKeyboard(s.Primary.Device)?UiLocalization.Get("input.keyboard"):Controls.Label(s.Primary.Device)),MenuTheme.Paper,15);row+=34;
+		if(MenuTheme.Choice(new Rect(5,row,cw-10,35),Help(UiLocalization.Get("input.keyboard"),UiLocalization.Get("input.keyboard_tip")),Controls.IsKeyboard(s.Primary.Device)))s.AssignPrimary(InputDevice.Null);
 		row+=43;
 		MenuTheme.Text(new Rect(5,row,cw-10,60),UiLocalization.Get("input.p1_hint"),MenuTheme.Muted,13);row+=66;
 		foreach(InputDevice device in devices)DeviceRow(s,device,Controls.Label(device),cw,ref row);
@@ -565,7 +580,7 @@ internal static class Hud
 			MenuTheme.DeviceGlyph(new Rect(card.x+12,card.y+26,24,24),Controls.IsKeyboard(player.Device),player.Color);
 			MenuTheme.Text(new Rect(card.x+44,card.y+12,42,24),"P"+(player.Index+1),player.Color,20);
 			MenuTheme.Text(new Rect(card.x+91,card.y+12,card.width-106,24),string.IsNullOrEmpty(player.ProfileId)?player.DeviceName:PlayerProfiles.Display(player),MenuTheme.Paper,14);
-			string detail=player.Connected?SkinBridge.Display(player):UiLocalization.Get("players.disconnected").Trim();
+			string detail=player.Connected?(Controls.IsKeyboard(player.Device)?UiLocalization.Get("input.keyboard"):Controls.Label(player.Device)):UiLocalization.Get("players.disconnected").Trim();
 			MenuTheme.Text(new Rect(card.x+44,card.y+41,card.width-59,20),detail,MenuTheme.Muted,12);n++;
 		}
 		row+=Mathf.CeilToInt(n/(float)columns)*85+4;
@@ -639,7 +654,7 @@ internal static class Hud
 			if(MenuTheme.Button(new Rect(5,row,cw*.49f-7,34),UiLocalization.Get("common.reset"),button))
 			{
 				ActionKeys.Capturing=0;
-				Controls.Dispose(p);Controls.InitSecondary(p,s.Players[0].Actions,InputDevice.Null);
+				Controls.ResetKeyboard(p,s.OriginalActions);
 			}
 			if(MenuTheme.Button(new Rect(cw*.5f,row,cw*.49f,34),UiLocalization.Get("common.back"),button))ChangeTab(0);
 			row+=43;return;

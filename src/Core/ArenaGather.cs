@@ -568,6 +568,8 @@ internal static class ArenaGather
 
 	private static bool finished;
 
+	private static bool encounterEntry;
+
 	private const float GatheringWindow = 4f;
 
 	private static int generation;
@@ -775,15 +777,25 @@ internal static class ArenaGather
 			}
 			if (flag)
 			{
-				usedBossLocks.Add(area);
 				HealthManager healthManager = Fight(coopSession, allowOrdinary: false);
+				if ((bool)healthManager)
+				{
+					// A corridor camera lock can have "boss" in its ancestry.
+					// Debounce rejection too; trigger-stay must not scan the
+					// scene again for every actor on every rendered frame.
+					Vector3 at = healthManager.transform.position;
+					if (at.x < bounds.min.x - 3f || at.x > bounds.max.x + 3f
+						|| at.y < bounds.min.y - 3f || at.y > bounds.max.y + 3f)
+					{ bossLockTouches[area] = Time.unscaledTime; return; }
+				}
+				usedBossLocks.Add(area);
 				if ((bool)healthManager)
 				{
 					engagedBosses.Add(healthManager);
 				}
 				string[] obj = new string[8]
 				{
-					"Room_Final_Boss_Atrium",
+					"ARENA camera trigger=",
 					area.name,
 					" P",
 					(playerSlot.Index + 1).ToString(),
@@ -844,11 +856,12 @@ internal static class ArenaGather
 		}
 	}
 
-	private static void StartGather(CoopSession s, PlayerSlot entrant, HealthManager boss, Bounds? cameraBounds = null)
+	private static void StartGather(CoopSession s, PlayerSlot entrant, HealthManager boss, Bounds? cameraBounds = null, bool beforeGatesClose = false)
 	{
 		generation++;
 		Restore();
 		ClearBattle();
+		encounterEntry = beforeGatesClose;
 		finished = false;
 		busy = (eventPending = true);
 		closeAt = Time.unscaledTime;
@@ -865,6 +878,21 @@ internal static class ArenaGather
 		Plugin.Self.StartCoroutine(Gather(s, generation, initial: true));
 	}
 
+	internal static void Encounter(Fsm source, PlayerSlot entrant)
+	{
+		var s = Plugin.Self ? Plugin.Self.Session : null;
+		if (s == null || !SceneReady(s) || s.Players.Count < 2 || !Valid(entrant)
+			|| source == null || source.Variables == null) return;
+		var target = source.Variables.FindFsmGameObject("Boss")?.Value;
+		var boss = target ? target.GetComponent<HealthManager>() : null;
+		if (!boss || boss.hp <= 0 || boss.GetIsDead() || !Boss(boss)) return;
+		// The native encounter owns the actual boss reference. Re-arm at
+		// dialogue entry and at its native gate-closing state, so a long
+		// conversation or an earlier camera window cannot strand a friend.
+		Diagnostics.Write("ARENA encounter state=" + source.ActiveStateName + " entrant=P" + (entrant.Index + 1));
+		StartGather(s, entrant, boss, beforeGatesClose: true);
+	}
+
 	private static void ScanGates(bool shutting)
 	{
 		barriers.Clear();
@@ -872,7 +900,7 @@ internal static class ArenaGather
 		Collider2D[] array = UnityEngine.Object.FindObjectsOfType<Collider2D>();
 		foreach (Collider2D collider2D in array)
 		{
-			if ((bool)collider2D && !collider2D.isTrigger && collider2D.gameObject.activeInHierarchy && (collider2D.enabled || (shutting && EventGate(collider2D))) && (GateName(collider2D) || EventGate(collider2D)) && !collider2D.GetComponentInParent<HeroController>() && !collider2D.GetComponentInParent<HealthManager>() && !collider2D.GetComponentInParent<TransitionPoint>())
+			if ((bool)collider2D && !collider2D.isTrigger && collider2D.gameObject.activeInHierarchy && (collider2D.enabled || (shutting && (EventGate(collider2D) || encounterEntry && GateName(collider2D)))) && (GateName(collider2D) || EventGate(collider2D)) && !collider2D.GetComponentInParent<HeroController>() && !collider2D.GetComponentInParent<HealthManager>() && !collider2D.GetComponentInParent<TransitionPoint>())
 			{
 				Bounds bounds = Shape(collider2D);
 				if (!(Mathf.Max(bounds.size.x, bounds.size.y) < 2.5f) && !(Mathf.Max(bounds.size.x, bounds.size.y) < Mathf.Min(bounds.size.x, bounds.size.y) * 1.2f))
@@ -1403,6 +1431,7 @@ internal static class ArenaGather
 
 	private static void ClearBattle()
 	{
+		encounterEntry = false;
 		closed = false;
 		encounterTarget = null;
 		pendingTarget = null;

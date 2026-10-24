@@ -117,7 +117,7 @@ public class GameManager : UnityEngine.Component {
 public enum ShaderQualities {Low,Medium,High}
 public class GameSettings {public ShaderQualities shaderQuality=ShaderQualities.Medium;}
 public class GameCameras : UnityEngine.Component {
- public static GameCameras instance; public UnityEngine.Camera mainCamera; public UnityEngine.GameObject hudCanvas;
+ public static GameCameras instance; public UnityEngine.Camera mainCamera, hudCamera; public UnityEngine.GameObject hudCanvas;
 }
 public class LightBlurredBackground : UnityEngine.MonoBehaviour {
  private UnityEngine.Camera sceneCamera, backgroundCamera; private float distantFarClipPlane;
@@ -153,6 +153,7 @@ namespace KO.HollowKnight8 {
  internal class CoopSession {
   internal bool Active = true, TeamWipe; internal readonly List<PlayerSlot> Players = new();
   internal PlayerSlot Primary => Players.Count == 0 ? null : Players[0];
+  internal PlayerSlot Resolve(HutongGames.PlayMaker.Fsm f)=>null;
  }
  internal class PlayerSlot {
   internal int Index; internal HeroController Hero, LightOwner; internal Renderer[] LightRenderers;

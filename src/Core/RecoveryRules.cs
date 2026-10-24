@@ -6,7 +6,10 @@ internal static class RecoveryRules
 {
 	internal static bool InRoom(double x, double y, double width, double height)
 	{
-		if (!double.IsNaN(x) && !double.IsNaN(y) && x >= 0.0 && y >= 0.0 && x <= width)
+		if (!double.IsNaN(x) && !double.IsInfinity(x) && !double.IsNaN(y) && !double.IsInfinity(y)
+			&& !double.IsNaN(width) && !double.IsInfinity(width) && width > 0
+			&& !double.IsNaN(height) && !double.IsInfinity(height) && height > 0
+			&& x >= 0.0 && y >= 0.0 && x <= width)
 		{
 			return y <= height;
 		}

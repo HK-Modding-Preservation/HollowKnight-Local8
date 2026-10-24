@@ -12,6 +12,7 @@ internal static class ProfileKeyboard
         try
         {
             candidate=new HeroActions();candidate.Load(saved);
+            if(!KeyboardBindingData.Valid(candidate))return false;
             var keys=new HashSet<string>(StringComparer.Ordinal);
             foreach(var action in candidate.Actions)foreach(var binding in action.Bindings)
                 if(binding is KeyBindingSource)keys.Add(binding.Name);
@@ -27,7 +28,8 @@ internal static class ProfileKeyboard
     internal static void Apply(PlayerSlot p,string saved)
     {
         if(Local8Mod.Settings.ExtraKeyboardBindings==null||Local8Mod.Settings.ExtraKeyboardBindings.Length!=8)Local8Mod.Settings.ExtraKeyboardBindings=new string[8];
-        p.Actions.Load(saved);KeypadInput.RepairMenus(p);p.Actions.ClearInputState();
+        if(!KeyboardBindingData.TryLoad(p.Actions,saved))throw new FormatException("Invalid keyboard profile");
+        KeypadInput.RepairMenus(p);
         Local8Mod.Settings.ExtraKeyboardBindings[p.Index]=saved;
     }
 }

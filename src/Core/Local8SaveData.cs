@@ -10,5 +10,8 @@ public sealed class Local8SaveData
 
 	public int SharedSoulState;
 
+	// 0: existing/unarmed save; 1: new-game notice pending; 2: already displayed.
+	public int CoopSetupHintState;
+
 	public PlayerAdventureStatistics[] AdventureStats;
 }

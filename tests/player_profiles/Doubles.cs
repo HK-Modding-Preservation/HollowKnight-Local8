@@ -16,15 +16,18 @@ namespace Modding {public class Mod {public static string Json;public static boo
 namespace InControl {
  public class InputDevice {public static InputDevice Null=new InputDevice();}
  public class BindingSource {public string Name;}
+ public class MouseBindingSource:BindingSource {}
  public class KeyBindingSource:BindingSource {public KeyBindingSource(string s){Name=s;}}
  public class PlayerAction {public List<BindingSource> Bindings=new List<BindingSource>();}
 }
 public class HeroActions {
  public static int Created,Destroyed;public List<InControl.PlayerAction> Actions=new List<InControl.PlayerAction>();public string Saved;
- public HeroActions(){Created++;}
- public void Load(string value){if(value=="invalid")throw new Exception("invalid keys");Saved=value;Actions.Clear();foreach(string key in value.Split(','))Actions.Add(new InControl.PlayerAction{Bindings=new List<InControl.BindingSource>{new InControl.KeyBindingSource(key)}});}
+ public InControl.PlayerAction left=new(),right=new(),up=new(),down=new(),jump=new(),attack=new();
+ public HeroActions(){Created++;Actions.AddRange(new[]{left,right,up,down,jump,attack});}
+ public void Load(string value){if(value=="invalid")throw new Exception("invalid keys");Saved=value;foreach(var action in Actions)action.Bindings.Clear();if(value=="silent-invalid")return;foreach(string key in value.Split(','))foreach(var action in Actions)action.Bindings.Add(new InControl.KeyBindingSource(key));}
  public string Save()=>Saved;public void Destroy(){Destroyed++;}public void ClearInputState(){}
 }
+
 public class HeroController:UnityEngine.Object {
  public class State {public bool transitioning;}public State cState=new State();public PlayMakerFSM damageEffectFSM,proxyFSM;public bool ThrowCharm;public int CharmCalls;
  public void CharmUpdate(){CharmCalls++;if(ThrowCharm){ThrowCharm=false;throw new Exception("charm provider");}var d=KO.HollowKnight8.Plugin.Self.Session.Data;d.health=99;d.healthBlue=99;}

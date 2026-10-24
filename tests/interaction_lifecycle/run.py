@@ -60,7 +60,7 @@ for name, text in [('InteractionRouter', router), ('LegacyRouter', legacy)]:
             code += extract(router, marker)
     code += '}'
 hooks=(root/'src/Core/Hooks.cs').read_text()
-code+='internal static class Hooks {internal static CoopSession Session=>Plugin.Self.Session;static PlayerSlot FsmPlayer(Fsm f,out bool enemy){enemy=false;return InteractionRouter.Resolve(f);}static void RebindObject(object action,PlayerSlot p){}internal static void Call(On.HutongGames.PlayMaker.Actions.CallMethodProper.orig_OnEnter o,CallMethodProper action)=>InteractionCall(o,action);internal static void State(On.HutongGames.PlayMaker.FsmState.orig_OnEnter o,FsmState state)=>StateEnter(o,state);'
+code+='internal static class Hooks {internal static CoopSession Session=>Plugin.Self.Session;static PlayerSlot FsmPlayer(Fsm f,out bool enemy){enemy=false;return HornetEncounterFlow.Resolve(f)??InteractionRouter.Resolve(f)??WorldRouting.Resolve(f);}static void RebindObject(object action,PlayerSlot p){}internal static void Call(On.HutongGames.PlayMaker.Actions.CallMethodProper.orig_OnEnter o,CallMethodProper action)=>InteractionCall(o,action);internal static void State(On.HutongGames.PlayMaker.FsmState.orig_OnEnter o,FsmState state)=>StateEnter(o,state);'
 for marker in ['private static void InteractionCall(', 'private static void StateEnter(']:code+=extract(hooks,marker)
 code+='}'
 code+='internal partial class CoopSession {readonly Dictionary<PlayerSlot,float> stuckSince=new();readonly Dictionary<PlayerSlot,Vector3> stuckPosition=new();internal int VisualRestores;internal static void RestoreLivingVisuals(PlayerSlot p)=>Plugin.Self.Session.VisualRestores++;internal void Check(PlayerSlot p)=>CheckStuckControl(p);'
@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='local8-interaction-lifecycle-') as fold
     (out/'Host.cs').write_text(code)
     options=['-nologo','-target:exe','-langversion:latest','-optimize+','-out:'+str(out/'Test.dll')]
     options+=['-r:'+str(p) for p in refs.glob('*.dll')]
-    options += [str(here/'Doubles.cs'),str(here/'Test.cs'),str(out/'Host.cs'),str(root/'src/Features/InteractionControlLifecycle.cs')]
+    options += [str(here/'Doubles.cs'),str(here/'Test.cs'),str(out/'Host.cs'),str(root/'src/Features/InteractionControlLifecycle.cs'),str(root/'src/Features/HornetEncounterFlow.cs')]
     (out/'test.rsp').write_text('\n'.join('"'+s+'"' for s in options))
     (out/'Test.runtimeconfig.json').write_text(json.dumps({'runtimeOptions':{'tfm':refs.name,'framework':{'name':'Microsoft.NETCore.App','version':framework.name}}}))
     subprocess.run([dotnet,str(sdk/version/'Roslyn/bincore/csc.dll'),'@'+str(out/'test.rsp')],check=True)

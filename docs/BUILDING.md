@@ -1,6 +1,6 @@
-# Building Hollow Knight 8-Player Co-op v0.11.1
+# Building Hollow Knight 8-Player Co-op v0.11.2
 
-This is the complete source for v0.11.1: v0.11.0/alpha227 gameplay plus P1 controller selection/reconnection fixes and metadata `0.11.1` / `0.11.1.0`. No previous mod DLL is a build input.
+This is the complete source for v0.11.2, including the tested test1–test17 corrections. Runtime version is `0.11.2`; assembly/file/ModLinks version is `0.11.2.0`. No previous mod DLL is a build input.
 
 ## Canonical release build
 
@@ -22,6 +22,6 @@ The reference directory must include the matching `Assembly-CSharp.dll`, `MMHOOK
 
 ## Controlled tests
 
-The `tests/` runners accept `--dotnet`; some also require `--managed` for reference-contract or native-IL checks. These hosts execute production methods with explicit doubles, not Unity gameplay. See [validation](VALIDATION_v0.11.1.md). The new input suite is `tests/primary_controller/run.py`.
+The `tests/` runners accept `--dotnet`; some also require `--managed` for reference-contract or native-IL checks. These hosts execute production methods with explicit doubles, not Unity gameplay. See [validation](VALIDATION_v0.11.2.md). Input checks include `primary_controller` and `controller_native`; 37 suites cover the documented controlled component paths.
 
 Do not commit local reference paths, game libraries, `LocalBuildProperties.props`, `bin`, `obj`, `artifacts`, PDBs, response files or user logs.

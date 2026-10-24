@@ -23,7 +23,7 @@ public class PlayMakerFSM:UnityEngine.Object{
 namespace HutongGames.PlayMaker{
  public class FsmEvent{public string Name;}
  public class FsmEventData{public Fsm SentByFsm;public UnityEngine.GameObject SentByGameObject;}
- public class Fsm{public string Name;public PlayMakerFSM Owner;public Action<Fsm,FsmEvent,FsmEventData> Receive;public void ProcessEvent(FsmEvent evt,FsmEventData data)=>Receive?.Invoke(this,evt,data);}
+ public class Fsm{public string Name;public PlayMakerFSM Owner;public UnityEngine.GameObject GameObject=>Owner?.gameObject;public Action<Fsm,FsmEvent,FsmEventData> Receive;public void ProcessEvent(FsmEvent evt,FsmEventData data)=>Receive?.Invoke(this,evt,data);}
 }
 namespace On.HutongGames.PlayMaker{
  public static class Fsm{
@@ -41,5 +41,6 @@ namespace KO.HollowKnight8{
  internal static class Plugin{internal static Runtime Self=new();}
  internal class PlayerSlot{internal int Index;}
  internal static class ReferenceField{internal static int Compiled=4,Fallback;}
+ internal static class DamageParticleBudget{internal static void ResetWindow(){}internal static string Report()=>"";}
  internal static class Diagnostics{internal static readonly List<string>Messages=new();internal static void Write(string s)=>Messages.Add(s);internal static void Throttled(string s,Exception e)=>Messages.Add(s+e);}
 }

@@ -165,5 +165,16 @@ static class Test {
   Check(p.Rate.constant==45&&p.Max==250,"partial particle seed failure loses primary settings");
   GameManager.instance.gameSettings.particleEffectsLevel=1;Check(NativeParticleCopy.Begin(source)==null,"normal profile performs particle copy work");
  }
- static int Main(){try{Automatic();Originals();ExternalEdits();Migration();RefreshAndSteady();MenuActions();ParticleCopies();PerformancePresets.Shutdown(Plugin.Self);Check(On.GameSettings.Count==0,"native save hook leaked");Console.WriteLine("PASS performance presets: "+checks+" checks (controlled host; no Unity FPS measurement)");return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}}
+ static void FeedbackPreferences(){
+  var r=Runtime(0);Check(r.Performance.HazardEffects&&r.Performance.HudHealthEffects,"new feedback settings default off");
+  r.Lobby.Count=8;Tick(r);Check(r.Performance.Preset==2&&PerformancePresets.PlayerCount(r)==8,"automatic profile ignores pregame group");
+  r.Performance.HazardEffects=r.Performance.HudHealthEffects=false;
+  for(int i=0;i<3;i++){PerformancePresets.Apply(r,i);Check(!r.Performance.HazardEffects&&!r.Performance.HudHealthEffects,"profile overwrote feedback choice");}
+  PerformancePresets.Restore(r);Check(!r.Performance.HazardEffects&&!r.Performance.HudHealthEffects,"restore overwrote feedback choice");
+  var loaded=JsonSerializer.Deserialize<PerformanceConfiguration>(JsonSerializer.Serialize(r.Performance,Json),Json);
+  Check(!loaded.HazardEffects&&!loaded.HudHealthEffects,"feedback choice does not survive settings reload");
+  var legacy=JsonSerializer.Deserialize<PerformanceConfiguration>("{\"Initialized\":true}",Json);
+  legacy.Ensure(false,true);Check(legacy.HazardEffects&&legacy.HudHealthEffects,"existing settings do not receive enabled defaults");
+ }
+ static int Main(){try{Automatic();Originals();ExternalEdits();Migration();RefreshAndSteady();MenuActions();ParticleCopies();FeedbackPreferences();PerformancePresets.Shutdown(Plugin.Self);Check(On.GameSettings.Count==0,"native save hook leaked");Console.WriteLine("PASS performance presets: "+checks+" checks (controlled host; no Unity FPS measurement)");return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}}
 }

@@ -5,7 +5,7 @@ using System.Text.Json;
 using KO.HollowKnight8;
 using UnityEngine;
 using InControl;
-static class Test {
+static partial class Test {
  static int checks;
  static void Check(bool v,string m){checks++;if(!v)throw new Exception(m);}
  static Local8Runtime Runtime(int count){var r=new Local8Runtime();Plugin.Self=r;for(int i=0;i<count;i++)r.Session.Players.Add(new PlayerSlot{Index=i,Device=i<2?InputDevice.Null:new InputDevice{Name="Controller "+i},Color=i%2==0?MenuTheme.Accent:new Color(.92f,.57f,.9f)});return r;}
@@ -153,15 +153,14 @@ static class Test {
    for(int width=200;width<=690;width+=35){
     GUI.Reset(width+10,5000);float end=Hud.RenderPlayers(r,width);
     var inputs=GUI.Controls.Where(c=>c.Tip==UiLocalization.Get("input.auto_tip")||c.Tip==UiLocalization.Get("input.keyboard_tip")||c.Tip==UiLocalization.Get("input.assign_tip")).ToArray();
-    Check(inputs.Length==10,"P1 mode or assigned-controller buttons missing");
+    Check(inputs.Length==9&&!inputs.Any(c=>c.Tip==UiLocalization.Get("input.auto_tip")),"P1 panel confuses next-lobby automatic mode with current input");
     Check(inputs.All(c=>c.Enabled),"occupied controller cannot be assigned to P1");
     foreach(var c in inputs)Check(c.Rect.x>=0&&c.Rect.xMax<=width&&c.Rect.width>0&&c.Rect.yMax<end,"P1 controls exceed layout/scroll extent");
     for(int i=0;i<inputs.Length;i++)for(int j=i+1;j<inputs.Length;j++){var a=inputs[i].Rect;var b=inputs[j].Rect;Check(a.x>=b.xMax||b.x>=a.xMax||a.y>=b.yMax||b.y>=a.yMax,"P1 controls overlap");}
     Check(GUI.Paints.Any(p=>p.text==UiLocalization.Get("input.p1_title")&&p.rect[1]<80),"P1 control selection hidden below player profiles");
    }
-   Hud.ResetTest(0);Click(r,c=>c.Tip==UiLocalization.Get("input.auto_tip"));Check(r.Session.AssignCalls==1,"Automatic P1 callback missing");
-   Click(r,c=>c.Tip==UiLocalization.Get("input.keyboard_tip"));Check(r.Session.AssignCalls==2&&r.Session.Primary.Device==InputDevice.Null,"P1 keyboard callback missing");
-   Click(r,c=>c.Tip==UiLocalization.Get("input.assign_tip"));Check(r.Session.AssignCalls==3,"P1 controller assignment callback missing");
+   Hud.ResetTest(0);Click(r,c=>c.Tip==UiLocalization.Get("input.keyboard_tip"));Check(r.Session.AssignCalls==1&&r.Session.Primary.Device==InputDevice.Null,"P1 keyboard callback missing");
+   Click(r,c=>c.Tip==UiLocalization.Get("input.assign_tip"));Check(r.Session.AssignCalls==2,"P1 controller assignment callback missing");
   }
   Controls.Available=Array.Empty<InputDevice>();
  }
@@ -244,7 +243,7 @@ static class Test {
   Check(MenuTheme.Skin.verticalScrollbar.fixedWidth>=14,"Scrollbar too narrow to grab");
   var track=MenuTheme.Skin.verticalScrollbar;var thumb=MenuTheme.Skin.verticalScrollbarThumb;
   Check(track.fixedWidth==thumb.fixedWidth&&thumb.margin.left==0&&thumb.margin.right==0,"Scrollbar thumb is horizontally displaced from its track");
-  ContinuousBars();Profiles(langs);PerformancePage(langs);
+  ContinuousBars();Profiles(langs);PerformancePage(langs);LobbyPage(langs);DlcPlacement();
   foreach(var texture in Texture2D.Created.Where(t=>t.name=="Local8.Menu.bar.fill"))foreach(var color in texture.Pixels)
    Check(color.a==0||color.r==1&&color.g==1&&color.b==1,"Black source pixels contaminate tinted sliders");
   // Failure during custom charm rendering restores the menu's skin and styles exactly.
@@ -252,7 +251,7 @@ static class Test {
   bool threw=false;try{Render(r);}catch(Exception){threw=true;}Charms.Editing=false;Charms.ThrowIcon=false;
   Check(threw&&ReferenceEquals(GUI.skin,before)&&ReferenceEquals(Hud.CurrentText,text),"Exception stranded native UI skin");
   Color old=new Color(.2f,.3f,.4f,.7f);GUI.color=old;GUI.ThrowTexture=true;try{MenuTheme.Fill(new Rect(1,1,4,4),Color.white);}catch(InvalidOperationException){}GUI.ThrowTexture=false;Check(GUI.color.r==old.r&&GUI.color.a==old.a,"Theme leaked tint after draw failure");GUI.color=Color.white;
-  if(args.Length>0){Directory.CreateDirectory(args[0]);var demo=Runtime(4);Language.Language.Code="ES";SavePreview(Path.Combine(args[0],"game.json"),demo,1);SavePreview(Path.Combine(args[0],"players.json"),demo,0);SavePreview(Path.Combine(args[0],"pvp.json"),demo,2);SavePreview(Path.Combine(args[0],"settings.json"),demo,3);Charms.Open(demo.Session.Players[1]);SavePreview(Path.Combine(args[0],"charms.json"),demo,0);Charms.Close();
+  if(args.Length>0){Directory.CreateDirectory(args[0]);LobbyPreviews(args[0]);var demo=Runtime(4);Language.Language.Code="ES";SavePreview(Path.Combine(args[0],"game.json"),demo,1);SavePreview(Path.Combine(args[0],"players.json"),demo,0);SavePreview(Path.Combine(args[0],"pvp.json"),demo,2);SavePreview(Path.Combine(args[0],"settings.json"),demo,3);Charms.Open(demo.Session.Players[1]);SavePreview(Path.Combine(args[0],"charms.json"),demo,0);Charms.Close();
    Hud.ResetTest(2,1);Click(demo,c=>c.Text==UiLocalization.Get("stats.adventure"));Render(demo);
    var statsTextures=GUI.Textures.ToDictionary(x=>x.Key,x=>new {width=x.Value.width,height=x.Value.height,rgba=Convert.ToBase64String(x.Value.Pixels.SelectMany(p=>new[]{(byte)(p.r*255),(byte)(p.g*255),(byte)(p.b*255),(byte)(p.a*255)}).ToArray())});
    File.WriteAllText(Path.Combine(args[0],"adventure.json"),JsonSerializer.Serialize(new{width=GUI.ViewWidth,height=GUI.ViewHeight,paints=GUI.Paints,textures=statsTextures},new JsonSerializerOptions{IncludeFields=true}));

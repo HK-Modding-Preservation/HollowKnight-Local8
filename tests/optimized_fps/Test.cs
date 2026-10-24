@@ -66,5 +66,16 @@ static class Test {
   }
   Console.WriteLine("Light: moving transforms/cameras, all flips and 1–8 players preserve original projected coordinates and UVs; projection is computed once per source vertex/rebuild.");
  }
- static void Main(){OwnerChecks();InteractionChecks();ProjectionChecks();Console.WriteLine("PASS "+checks+" optimization correctness checks; controlled API-call comparisons, not Unity FPS.");}
+ static void InteractionGuards(){
+  var s=new CoopSession();var p=Player(s,0);p.Actions.up.IsPressed=true;var e=new Entry{Up=true};
+  Check(InteractionUnderTest.TestRequest(e,p),"normal up request is ignored");
+  p.Hero.controlReqlinquished=true;Check(!InteractionUnderTest.TestRequest(e,p),"relinquished actor can request interaction");p.Hero.controlReqlinquished=false;
+  p.Vitals.AtBench=true;Check(!InteractionUnderTest.TestRequest(e,p),"bench actor opens foreign prompt");e.Bench=true;Check(InteractionUnderTest.TestRequest(e,p),"bench request itself is blocked");p.Vitals.AtBench=false;e.Bench=false;
+  p.SeatOccupied=true;Check(!InteractionUnderTest.TestRequest(e,p),"seated actor opens foreign prompt");p.SeatOccupied=false;
+  var inventory=new GameObject().AddComponent<PlayMakerFSM>();GameManager.instance=new(){inventoryFSM=inventory};
+  foreach(string state in new[]{"Opened","Open","Open Current Pane","Tween Panes"}){inventory.ActiveStateName=state;Check(!InteractionUnderTest.TestRequest(e,p),"open inventory leaks up into interaction");}
+  inventory.isActiveAndEnabled=false;Check(InteractionUnderTest.TestRequest(e,p),"disabled inventory blocks interaction");inventory.isActiveAndEnabled=true;inventory.gameObject.activeInHierarchy=false;
+  Check(InteractionUnderTest.TestRequest(e,p),"inactive inventory root blocks interaction");GameManager.instance=null;
+ }
+ static void Main(){OwnerChecks();InteractionChecks();InteractionGuards();ProjectionChecks();Console.WriteLine("PASS "+checks+" optimization correctness checks; controlled API-call comparisons, not Unity FPS.");}
 }

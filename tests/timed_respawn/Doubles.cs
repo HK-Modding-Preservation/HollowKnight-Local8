@@ -7,8 +7,10 @@ namespace UnityEngine {
  public static class Time {public static float time,unscaledTime;}
  public static class Mathf {public static float Max(float a,float b)=>Math.Max(a,b);public static int CeilToInt(float n)=>(int)Math.Ceiling(n);}
 }
+namespace GlobalEnums {public enum HazardType {SPIKES,ACID,PIT}}
 public class HeroController:UnityEngine.Object {public UnityEngine.Transform transform=new();public State cState=new();public sealed class State {public bool dead,transitioning;}}
 namespace KO.HollowKnight8 {
+ internal static class HazardFeedback {internal static void Play(PlayerSlot p,GlobalEnums.HazardType kind,float angle=0){}}
  internal static class AdventureStats {internal static void Down(PlayerSlot p) {}}
  internal class Vitals {internal int Health=5,Blue;}
  internal class PlayerSlot {

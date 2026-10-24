@@ -50,13 +50,13 @@ internal static class BossMusicGuard {
     // Never replace a different phase/scene clip installed by the game.
     if(!source.isPlaying&&(!source.clip||source.clip==saved.Clip)){
      source.clip=saved.Clip;source.timeSamples=Math.Max(0,Math.Min(saved.Sample,saved.Clip.samples-1));source.volume=saved.Volume;source.Play();repaired=true;
-    }else if(source.clip==saved.Clip&&source.isPlaying&&source.volume==0&&saved.Volume>0){source.volume=saved.Volume;repaired=true;}
+    }else if(source.clip==saved.Clip&&source.isPlaying&&source.volume<saved.Volume&&saved.Volume>0){source.volume=saved.Volume;repaired=true;}
    }
-   if(source.isPlaying&&source.clip){hasPlayback=true;saved.Clip=source.clip;saved.Sample=source.timeSamples;if(source.volume>0)saved.Volume=source.volume;saved.LastPlaying=Time.unscaledTime;}
+   if(source.isPlaying&&source.clip){hasPlayback=true;bool changed=saved.Clip!=source.clip;saved.Clip=source.clip;saved.Sample=source.timeSamples;if(source.volume>0&&(changed||!protect||Time.unscaledTime>=repairUntil||saved.Volume<=0))saved.Volume=source.volume;saved.LastPlaying=Time.unscaledTime;}
   }
   // Result/countdown deaths sometimes mute only the mixer; the cue and its
   // sources remain playing. Reassert this cue's own snapshot during that window.
-  if(protect&&hasPlayback&&cue.Snapshot&&Time.unscaledTime<repairUntil&&Time.unscaledTime>=nextSnapshot&&(PvpArena.KeepsMusic||repaired)){
+  if(protect&&hasPlayback&&cue.Snapshot&&Time.unscaledTime<repairUntil&&Time.unscaledTime>=nextSnapshot&&(PvpArena.KeepsMusic||repaired||death)){
    cue.Snapshot.TransitionTo(.15f);nextSnapshot=Time.unscaledTime+.6f;
   }
   if(repaired)Log("resumed after death",cue,cue);
@@ -117,7 +117,10 @@ internal static class BossMusicGuard {
   GameManager game=GameManager.instance;if(!game||!next||!audio)return false;
   MusicCue current=audio.CurrentMusicCue;
   AudioMixerSnapshot silence=game.noMusicCue?game.noMusicCue.Snapshot:null;
-  if((next==silence||next==game.noMusicSnapshot)&&current&&current!=game.noMusicCue&&current.Snapshot!=next&&CombatAlive(Plugin.Self==null?null:Plugin.Self.Session)){
+  // The native death prefab also uses a separate "Silent" snapshot. Identify
+  // that music mixer by reference, not its name; keep the death's SFX mixer.
+  bool individualMusic=PartySoul.IndividualDeathAudio&&current&&current.Snapshot&&next.audioMixer&&next.audioMixer==current.Snapshot.audioMixer;
+  if((individualMusic||next==silence||next==game.noMusicSnapshot)&&current&&current!=game.noMusicCue&&current.Snapshot!=next&&CombatAlive(Plugin.Self==null?null:Plugin.Self.Session)){
    Log("combat snapshot",current,next);return true;
   }
   return false;

@@ -17,6 +17,45 @@ internal static class VanillaHud
 	private static int canvasChildren;
 
 	private static bool installed;
+	[ThreadStatic] internal static GameObject SpawnSource;
+	private static readonly Dictionary<GameObject, List<Renderer>> feedback = new Dictionary<GameObject, List<Renderer>>();
+
+	// Native health FSMs can pool their bursts outside the HUD hierarchy. Hiding
+	// the masks alone leaves those renderers at the original single-player HUD.
+	internal static void Spawned(GameObject result, GameObject source)
+	{
+		if (!result) return;
+		if (feedback.TryGetValue(result, out var previous))
+		{
+			foreach (var renderer in previous)
+				if (renderer && hidden.TryGetValue(renderer, out bool visible))
+				{
+					renderer.forceRenderingOff = visible;
+					hidden.Remove(renderer);
+				}
+			feedback.Remove(result);
+		}
+		var runtime = Plugin.Self;
+		var game = GameManager.instance;
+		var cameras = GameCameras.instance;
+		if (runtime == null || !runtime.Enabled.Value || !runtime.HideOriginalHud.Value ||
+			runtime.Session == null || !runtime.Session.Active || !game || !game.IsGameplayScene() ||
+			game.IsLoadingSceneTransition || !cameras || !source) return;
+		Transform root = cameras.hudCanvas && source.transform.IsChildOf(cameras.hudCanvas.transform) ? cameras.hudCanvas.transform :
+			cameras.hudCamera && source.transform.IsChildOf(cameras.hudCamera.transform) ? cameras.hudCamera.transform : null;
+		if (!root || !Vitals(source.transform, root)) return;
+		// The first burst can precede the first camera callback for this canvas.
+		if (canvas != cameras.hudCanvas) { Restore(); canvas = cameras.hudCanvas; }
+		var owned = new List<Renderer>();
+		result.GetComponentsInChildren(includeInactive: true, owned);
+		foreach (var renderer in owned)
+			if (renderer)
+			{
+				if (!hidden.ContainsKey(renderer)) hidden[renderer] = renderer.forceRenderingOff;
+				renderer.forceRenderingOff = true;
+			}
+		feedback[result] = owned;
+	}
 
 	internal static void Install()
 	{
@@ -49,6 +88,7 @@ internal static class VanillaHud
 			}
 		}
 		hidden.Clear();
+		feedback.Clear();
 		renderers.Clear();
 		vitalRoots.Clear(); canvas = null; nextDiscovery = 0f; canvasChildren = -1;
 		scanned = -1;

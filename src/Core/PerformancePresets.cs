@@ -8,6 +8,12 @@ internal static class PerformancePresets
     private static int roster = -1, logged = -1;
     private static bool previousAuto;
 
+    internal static int PlayerCount(Local8Runtime runtime)
+    {
+        int count = runtime.Session == null ? 0 : runtime.Session.Players.Count;
+        return count > 0 ? count : runtime.Lobby.Count;
+    }
+
     internal static void Install(Local8Runtime runtime)
     {
         owner = runtime; roster = logged = -1; previousAuto = !runtime.Performance.Automatic;
@@ -19,7 +25,7 @@ internal static class PerformancePresets
         try
         {
             if (owner != runtime) Install(runtime);
-            int count = runtime.Session == null ? 0 : runtime.Session.Players.Count;
+            int count = PlayerCount(runtime);
             var options = runtime.Performance;
             if (options.Automatic && (count != roster || !previousAuto))
             {
@@ -50,7 +56,7 @@ internal static class PerformancePresets
     internal static void Automatic(Local8Runtime runtime, bool enabled)
     {
         runtime.Performance.Automatic = enabled;
-        if (enabled) Apply(runtime, PerformanceConfiguration.Recommend(runtime.Session == null ? 0 : runtime.Session.Players.Count), true);
+        if (enabled) Apply(runtime, PerformanceConfiguration.Recommend(PlayerCount(runtime)), true);
         previousAuto = enabled;
     }
     internal static void Customize(Local8Runtime runtime)
@@ -73,13 +79,14 @@ internal static class PerformancePresets
         var o = runtime.Performance;
         return o.Preset | (o.Automatic ? 4 : 0) | ((o.NativeParticles + 1) << 3) |
             ((o.NativeBlur + 1) << 5) | (o.Detail << 7) | (o.Bloom << 9) |
-            (runtime.ReduceHitEffects.Value ? 2048 : 0);
+            (runtime.ReduceHitEffects.Value ? 2048 : 0) | (o.HazardEffects ? 4096 : 0) | (o.HudHealthEffects ? 8192 : 0);
     }
     internal static string Report(Local8Runtime runtime)
     {
         var o = runtime.Performance; var gm = GameManager.instance;
         return "profile=" + (o.Preset == 0 ? "normal" : o.Preset == 1 ? "balanced" : o.Preset == 2 ? "maximum" : "custom") +
             " automatic=" + o.Automatic + " detail=" + o.Detail + " bloom=" + o.Bloom +
+            " hazard_effects=" + o.HazardEffects + " hud_health_effects=" + o.HudHealthEffects +
             " native_particles=" + (gm && gm.gameSettings != null ? gm.gameSettings.particleEffectsLevel : -1) +
             " native_blur=" + (gm && gm.gameSettings != null ? (int)gm.gameSettings.shaderQuality : -1);
     }

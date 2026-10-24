@@ -13,6 +13,7 @@ internal static class PartySensorOccupancy
         internal Collider2D[] Shapes;
         internal readonly HashSet<Collider2D> Contacts = new HashSet<Collider2D>();
         internal bool Occupied, Wrote;
+        internal int Frame = -1, Actors;
     }
     private struct Notice { internal EnemyWakeRegion Region; internal bool Occupied; }
     private static readonly Dictionary<Behaviour, Sensor> sensors = new Dictionary<Behaviour, Sensor>();
@@ -30,6 +31,8 @@ internal static class PartySensorOccupancy
         On.AlertRange.OnTriggerExit2D += AlertExit;
         On.EnemyWakeRegion.OnTriggerEnter2D += WakeEnter;
         On.EnemyWakeRegion.OnTriggerExit2D += WakeExit;
+        On.CheckAlertRange.Apply += Alert;
+        On.CheckAlertRangeByName.Apply += NamedAlert;
     }
     internal static void Uninstall()
     {
@@ -39,6 +42,8 @@ internal static class PartySensorOccupancy
         On.AlertRange.OnTriggerExit2D -= AlertExit;
         On.EnemyWakeRegion.OnTriggerEnter2D -= WakeEnter;
         On.EnemyWakeRegion.OnTriggerExit2D -= WakeExit;
+        On.CheckAlertRange.Apply -= Alert;
+        On.CheckAlertRangeByName.Apply -= NamedAlert;
         Reset();
     }
     private static void Restore(Sensor state)
@@ -48,7 +53,7 @@ internal static class PartySensorOccupancy
             // On leaving coop, a primary hero still inside must remain visible
             // to vanilla. Restoring the value from before Enter would lose it.
             bool occupied = false;
-            if (range.enabled && range.gameObject.activeInHierarchy)
+            if (range.gameObject.activeInHierarchy)
                 foreach (var body in state.Contacts)
                 {
                     var hero = body ? body.GetComponentInParent<HeroController>() : null;
@@ -88,29 +93,69 @@ internal static class PartySensorOccupancy
         {
             state = new Sensor { Owner = owner, Shapes = Shapes(owner) };
             sensors[owner] = state;
-            // Seed once if coop takes over a range that already contains heroes.
-            // Thereafter Enter/Exit maintain the set without an all-party query.
-            foreach (var p in WorldContactRouting.Session.Players)
-            {
-                if (!WorldContactRouting.Eligible(p)) continue;
-                Collider2D[] colliders;
-                if (!bodies.TryGetValue(p.Hero, out colliders)) bodies[p.Hero] = colliders = p.Hero.GetComponents<Collider2D>();
-                foreach (var body in colliders) if (Touches(state, body)) state.Contacts.Add(body);
-            }
+            Seed(state);
         }
         return state;
+    }
+    private static void Seed(Sensor state)
+    {
+        state.Actors = 0;
+        foreach (var p in WorldContactRouting.Session.Players)
+        {
+            if (!WorldContactRouting.Eligible(p) || TransitionVote.Holding(p)) continue;
+            foreach (var body in BodyShapes(p)) if (Touches(state, body))
+            {
+                state.Contacts.Add(body);
+                state.Actors |= 1 << p.Index;
+            }
+        }
+    }
+    private static Collider2D[] BodyShapes(PlayerSlot p)
+    {
+        if (!bodies.TryGetValue(p.Hero, out var colliders)) bodies[p.Hero] = colliders = ColliderGeometry.HeroBodies(p.Hero);
+        return colliders;
+    }
+    // Scene entry/pooling can enable a range around an already-overlapping
+    // hero without a new Enter. Refresh when native AI actually queries it.
+    internal static void Refresh(AlertRange range)
+    {
+        if (!Active || !range) return;
+        var state = Get(range);
+        if (state.Frame == Time.frameCount) return;
+        Seed(state);
+        Write(state, Occupied(state), nativeWrote: true);
+        state.Frame = Time.frameCount;
+    }
+    internal static bool Contains(AlertRange range, PlayerSlot p)
+    {
+        if (!range || !range.gameObject.activeInHierarchy
+            || !WorldContactRouting.Eligible(p) || TransitionVote.Holding(p)) return false;
+        Refresh(range);
+        return (Get(range).Actors & (1 << p.Index)) != 0;
+    }
+    private static void Alert(On.CheckAlertRange.orig_Apply orig, CheckAlertRange action)
+    {
+        Refresh(action.alertRange == null ? null : action.alertRange.Value as AlertRange);
+        orig(action);
+    }
+    private static void NamedAlert(On.CheckAlertRangeByName.orig_Apply orig, CheckAlertRangeByName action)
+    {
+        if (Active) Refresh(AlertRange.Find(action.Owner, action.childName));
+        orig(action);
     }
     private static bool Touches(Sensor state, Collider2D body)
     {
         if (!body || !body.enabled || !body.gameObject.activeInHierarchy) return false;
         foreach (var shape in state.Shapes)
-            if (shape && shape.enabled && shape.gameObject.activeInHierarchy && shape.bounds.Intersects(body.bounds)
-                && shape.Distance(body).isOverlapped) return true;
+            if (shape && shape.enabled && shape.gameObject.activeInHierarchy
+                && ColliderGeometry.Overlaps(shape, body)) return true;
         return false;
     }
     private static bool Occupied(Sensor state)
     {
-        if (!state.Owner || !state.Owner.enabled || !state.Owner.gameObject.activeInHierarchy) return false;
+        // Unity delivers trigger callbacks to disabled MonoBehaviours too.
+        // The active object and enabled collider define a live sensor.
+        if (!state.Owner || !state.Owner.gameObject.activeInHierarchy) return false;
         expired.Clear();
         bool occupied = false;
         foreach (var body in state.Contacts)
@@ -118,7 +163,7 @@ internal static class PartySensorOccupancy
             var p = WorldContactRouting.Body(body);
             var hero = body ? body.GetComponentInParent<HeroController>() : null;
             if (!Touches(state, body) || (hero && p == null)) expired.Add(body);
-            else if (!hero || WorldContactRouting.Eligible(p)) occupied = true;
+            else if (!hero || (WorldContactRouting.Eligible(p) && !TransitionVote.Holding(p))) occupied = true;
             // Keep an inactive slot's still-overlapping body as a dormant
             // contact: reviving in place may not produce a new Enter callback.
         }
@@ -149,9 +194,9 @@ internal static class PartySensorOccupancy
             var state = entry.Value;
             bool was = state.Occupied, now = Occupied(state);
             Write(state, now);
-            if (was != now && state.Owner is EnemyWakeRegion wake && wake && wake.enabled && wake.gameObject.activeInHierarchy)
+            if (was != now && state.Owner is EnemyWakeRegion wake && wake && wake.gameObject.activeInHierarchy)
                 notices.Add(new Notice { Region = wake, Occupied = now });
-            if (!state.Owner || !state.Owner.enabled || !state.Owner.gameObject.activeInHierarchy) removed.Add(entry.Key);
+            if (!state.Owner || !state.Owner.gameObject.activeInHierarchy) removed.Add(entry.Key);
         }
         foreach (var key in removed) { Restore(sensors[key]); sensors.Remove(key); }
         if (bodies.Count > 8) bodies.Clear();
@@ -166,6 +211,8 @@ internal static class PartySensorOccupancy
     {
         if (!Active) { orig(self, other); return; }
         var state = Get(self);
+        state.Frame = -1;
+        EnemySightRouting.ContactChanged(self);
         if (other) state.Contacts.Add(other);
         orig(self, other);
         Write(state, Occupied(state), nativeWrote: true);
@@ -174,6 +221,8 @@ internal static class PartySensorOccupancy
     {
         if (!Active) { orig(self, other); return; }
         var state = Get(self);
+        state.Frame = -1;
+        EnemySightRouting.ContactChanged(self);
         orig(self, other);
         Write(state, Occupied(state), nativeWrote: true);
     }

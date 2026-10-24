@@ -30,7 +30,7 @@ def block(text, signature):
 # duplicating their behavior in the test. A clock reset regresses these tests.
 restore = block(session, 'if (s.SpawnAsDown)')
 recovery = session[session.index('if (p2.Hazard &&'):session.index('if (!p2.Alive)', session.index('if (p2.Hazard &&'))]
-extracted = '''using System;using UnityEngine;namespace KO.HollowKnight8 {
+extracted = '''using System;using UnityEngine;using GlobalEnums;namespace KO.HollowKnight8 {
 internal partial class CoopSession {
 ''' + block(session, 'internal void Down(') + '\n' + block(session, 'internal void Hazard(') + '''
 internal void CompleteRoomRebuild(PlayerSlot s) {var coopSession=this;

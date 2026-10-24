@@ -21,6 +21,7 @@ internal static class WalkerTargeting
     private static readonly Dictionary<LineOfSightDetector, Binding> detectors = new Dictionary<LineOfSightDetector, Binding>();
     private static readonly List<Walker> remove = new List<Walker>();
     private static bool installed;
+    private static bool Eligible(PlayerSlot p) => WorldContactRouting.Eligible(p) && !TransitionVote.Holding(p);
     internal static void Install()
     {
         if (installed) return;
@@ -64,7 +65,7 @@ internal static class WalkerTargeting
     }
     private static PlayerSlot Target(Binding binding, bool waiting)
     {
-        if (binding.Frame == Time.frameCount && WorldContactRouting.Eligible(binding.Target)) return binding.Target;
+        if (binding.Frame == Time.frameCount && Eligible(binding.Target)) return binding.Target;
         var s = WorldContactRouting.Session;
         var origin = binding.Walker.transform.position;
         bool threshold = waiting && Reflect.Get(binding.Walker, "waitForHeroX", false);
@@ -73,11 +74,11 @@ internal static class WalkerTargeting
         float distance = float.MaxValue;
         foreach (var p in s.Players)
         {
-            if (!WorldContactRouting.Eligible(p)) continue;
+            if (!Eligible(p)) continue;
             float d = threshold ? Mathf.Abs(p.Hero.transform.position.x - x) : Vector3.Distance(origin, p.Hero.transform.position);
             if (d < distance) { best = p; distance = d; }
         }
-        if (!threshold && best != binding.Target && WorldContactRouting.Eligible(binding.Target)
+        if (!threshold && best != binding.Target && Eligible(binding.Target)
             && Vector3.Distance(origin, binding.Target.Hero.transform.position) <= distance + 1f) best = binding.Target;
         binding.Target = best; binding.Frame = Time.frameCount;
         return best;
@@ -97,8 +98,9 @@ internal static class WalkerTargeting
             if (binding.Detector != self) return false;
         }
         var p = Target(binding, false);
-        if (p == null) Reflect.Set(self, "canSeeHero", false);
-        else using (PlayerContext.Enter(p, enemy: true)) orig(self);
+        p = EnemySightRouting.Update(orig, self, p);
+        binding.Target = p;
+        binding.Frame = Time.frameCount;
         binding.SightTarget = p;
         binding.SightHero = p == null ? null : p.Hero;
         return true;
@@ -126,7 +128,10 @@ internal static class WalkerTargeting
         // A sensor result produced for the previous hero must not authorize a
         // turn towards a new hero behind a wall. Refresh only upon retargeting.
         if (binding.Detector && (binding.SightTarget != p || binding.SightHero != (p == null ? null : p.Hero)))
+        {
             Reflect.Call(binding.Detector, "Update");
+            p = binding.Target;
+        }
         var previous = Hero.GetValue(self);
         var hero = p == null ? null : p.Hero;
         try { Hero.SetValue(self, hero); using (PlayerContext.Enter(p, enemy: true)) orig(self); }

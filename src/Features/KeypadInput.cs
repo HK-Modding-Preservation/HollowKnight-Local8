@@ -32,7 +32,7 @@ internal static class KeypadInput {
   On.InControl.UnityKeyboardProvider.Update+=Update;
  }
  internal static void Defaults(PlayerSlot p){
-  if(p==null||p.Index<3||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
+  if(p==null||p.KeyboardProfile!=3||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
   // The older numeric constants were offset: Pad5 was left, NumLock was dash,
   // and Clear was cancel. Restore an explicit keypad layout before saved binds.
   var a=p.Actions;Bind(a.left,Key.Pad4);Bind(a.right,Key.Pad6);Bind(a.up,Key.Pad8);Bind(a.down,Key.Pad5);
@@ -41,7 +41,7 @@ internal static class KeypadInput {
   Bind(a.menuSubmit,Key.PadPeriod);Bind(a.menuCancel,Key.PadDivide);Bind(a.textSpeedup,Key.PadPeriod);Bind(a.skipCutscene,Key.PadDivide);Bind(a.paneLeft,Key.Pad4);Bind(a.paneRight,Key.PadPeriod);
  }
  internal static void RepairMenus(PlayerSlot p){
-  if(p==null||p.Index<3||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
+  if(p==null||p.Actions==null||!Controls.IsKeyboard(p.Device))return;
   foreach(var action in new[]{p.Actions.menuCancel,p.Actions.skipCutscene})if(action.Bindings.Count==1&&action.Bindings[0] is KeyBindingSource source&&source.Control.IncludeCount==1&&source.Control.ExcludeCount==0&&source.Control.GetInclude(0)==Key.Clear)Bind(action,Key.PadDivide);
  }
  static void Bind(PlayerAction action,Key key){action.ClearBindings();action.AddBinding(new KeyBindingSource(key));}

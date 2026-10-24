@@ -460,10 +460,10 @@ static class Test {
   NativeRenderBudget.BeforeCamera(f.Main);Check(bloom.blurIterations==3&&blur.RenderTextureHeight==540&&noise.enabled,"default mode changes native graphics");
   int initial=blur.ResizeCount;Plugin.Self.PerformanceMode.Value=true;NativeRenderBudget.BeforeCamera(f.Other);
   Check(bloom.blurIterations==1&&bloom.CurrentResolution==UnityStandardAssets.ImageEffects.BloomOptimized.Resolution.Low,"mode does not reduce bloom work");
-  Check(!noise.enabled&&blur.PassGroupCount==1&&blur.RenderTextureHeight==270&&blur.Texture.height==270,"mode only changes decorative particles");
-  Check(blur.ResizeCount==initial+1,"mode does not apply the smaller background texture");
+  Check(!noise.enabled&&blur.PassGroupCount==2&&blur.RenderTextureHeight==540&&blur.Texture.height==540,"balanced mode changes native background sampling");
+  Check(blur.ResizeCount==initial,"performance mode reallocates the native background texture");
   for(int i=0;i<1000;i++){Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);NativeRenderBudget.BeforeCamera(f.Other);}
-  Check(blur.ResizeCount==initial+1,"steady mode recreates GPU textures every frame");
+  Check(blur.ResizeCount==initial,"steady mode recreates GPU textures every frame");
   Plugin.Self.PerformanceMode.Value=false;NativeRenderBudget.BeforeCamera(f.Main);
   Check(noise.enabled&&bloom.blurIterations==3&&bloom.CurrentResolution==UnityStandardAssets.ImageEffects.BloomOptimized.Resolution.High,"off does not restore native noise/bloom");
   Check(blur.PassGroupCount==2&&blur.RenderTextureHeight==540&&blur.Texture.height==540,"off does not restore native background texture");
@@ -474,7 +474,7 @@ static class Test {
   GameManager.instance.gameSettings.shaderQuality=ShaderQualities.Low;Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);NativeRenderBudget.Reset();
   Check(blur.PassGroupCount==1,"restoring budget overwrites a new native graphics quality");
   Plugin.Self.PerformanceMode.Value=true;NativeRenderBudget.BeforeCamera(f.Main);blur.RenderTextureHeight=720;bloom.blurIterations=4;
-  Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);Check(blur.RenderTextureHeight==360&&bloom.blurIterations==1,"budget ignores updated external graphics values");
+  Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);Check(blur.RenderTextureHeight==720&&bloom.blurIterations==1,"budget ignores updated external graphics values");
   GameManager.instance.IsLoadingSceneTransition=true;NativeRenderBudget.BeforeCamera(f.Main);
   Check(blur.RenderTextureHeight==720&&bloom.blurIterations==4,"scene transition retains temporary budget values");
   GameManager.instance.IsLoadingSceneTransition=false;NativeRenderBudget.BeforeCamera(f.Main);
@@ -482,7 +482,7 @@ static class Test {
   Plugin.Self.Performance=new PerformanceConfiguration {Initialized=true, Detail=2, Bloom=2};
   bloom.blurIterations=4;noise.enabled=true;blur.RenderTextureHeight=720;blur.PassGroupCount=2;
   Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);
-  Check(!bloom.enabled&&!noise.enabled&&blur.RenderTextureHeight==180&&blur.Texture.height==180&&blur.PassGroupCount==1,"maximum profile leaves expensive bloom/background active");
+  Check(!bloom.enabled&&!noise.enabled&&blur.RenderTextureHeight==720&&blur.PassGroupCount==2,"maximum profile changes native background sampling or leaves bloom active");
   int maximumResizes=blur.ResizeCount;
   for(int i=0;i<1000;i++){Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);NativeRenderBudget.BeforeCamera(f.Other);}
   Check(blur.ResizeCount==maximumResizes,"maximum reallocates background textures each frame");
@@ -493,7 +493,7 @@ static class Test {
   Check(bloom.enabled&&bloom.blurIterations==1&&noise.enabled&&blur.RenderTextureHeight==720&&blur.PassGroupCount==2,"custom bloom-only setting changes decoration/background");
   NativeRenderBudget.Reset();Plugin.Self.Performance.Detail=2;Plugin.Self.Performance.Bloom=0;
   Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);
-  Check(bloom.enabled&&bloom.blurIterations==4&&!noise.enabled&&blur.RenderTextureHeight==180,"custom detail-only setting changes original bloom");
+  Check(bloom.enabled&&bloom.blurIterations==4&&!noise.enabled&&blur.RenderTextureHeight==720,"custom detail-only setting changes original bloom");
   NativeRenderBudget.Reset();bloom.enabled=false;Plugin.Self.Performance.Bloom=2;
   Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);NativeRenderBudget.Reset();
   Check(!bloom.enabled,"restoring maximum enables a previously disabled bloom");
@@ -504,7 +504,7 @@ static class Test {
   Plugin.Self.Performance=null;Time.frameCount++;NativeRenderBudget.BeforeCamera(f.Main);
   bloom.destroyed=true;noise.destroyed=true;blur.destroyed=true;NativeRenderBudget.Reset();
   Check(!Diagnostics.Messages.Any(m=>m.Contains("Exception")),"destroyed graphics component throws on restoration");
-  Console.WriteLine("Native budget: background pixel area at 540px becomes 25%; bloom iterations 3 -> 1; no steady render-texture reallocations. Not an in-game FPS measurement.");
+  Console.WriteLine("Native budget: background resolution and blur passes retained in every profile; bloom iterations 3 -> 1; no background render-texture reallocations. Not a Unity GPU/flicker test.");
  }
  static void HudBudget() {
   var f=new Fixture(4);var canvas=new GameObject("HUD canvas");GameCameras.instance.hudCanvas=canvas;
@@ -526,6 +526,75 @@ static class Test {
    Check(!mask.forceRenderingOff&&orb.forceRenderingOff&&!damaged.forceRenderingOff&&!reserved.forceRenderingOff,"HUD restore loses original visibility");
    Console.WriteLine("HUD fixture: 120-frame scans visit "+visits+" renderers versus over 120,000 for full-canvas scans; newly created damage masks hidden on the same frame.");
   }finally{VanillaHud.Uninstall();}
+ }
+ static void HudFeedback() {
+  var f=new Fixture(2);var canvas=new GameObject("HUD canvas");GameCameras.instance.hudCanvas=canvas;
+  var health=Child("Health",canvas.transform);var mask=Child("Mask",health.transform);
+  var journal=Child("Journal",canvas.transform);var hero=Child("Knight",null);
+  var burst=new GameObject("Detached heal burst");var particle=burst.Add<ParticleSystemRenderer>();
+  var alreadyHidden=Child("Initially hidden",burst.transform).Add<MeshRenderer>();alreadyHidden.forceRenderingOff=true;
+  VanillaHud.Install();
+  try{
+   VanillaHud.Spawned(burst,mask);
+   Check(particle.forceRenderingOff&&alreadyHidden.forceRenderingOff,"detached native healing burst remains at original HUD");
+   Time.frameCount++;UnityEngine.Camera.onPreCull(f.Main);
+   Check(particle.forceRenderingOff,"first camera restores a newly hidden burst when discovering the canvas");
+   VanillaHud.Spawned(burst,hero);
+   Check(!particle.forceRenderingOff&&alreadyHidden.forceRenderingOff,"pooled effect reuse loses original renderer flags");
+   Time.frameCount++;UnityEngine.Camera.onPreRender(f.Main);
+   Check(!particle.forceRenderingOff,"old HUD registration hides a recycled world effect again");
+   foreach(var source in new[]{hero,journal,canvas}){
+    VanillaHud.Spawned(burst,source);Check(!particle.forceRenderingOff,"non-vital/world source is mistaken for HUD feedback");
+   }
+   VanillaHud.Spawned(burst,null);VanillaHud.Spawned(null,mask);
+   Check(!particle.forceRenderingOff,"missing source suppresses a world effect");
+   var cameraRoot=new GameObject("HudCamera");GameCameras.instance.hudCamera=cameraRoot.Add<Camera>();
+   var cameraHealth=Child("Health",cameraRoot.transform);VanillaHud.Spawned(burst,cameraHealth);
+   Check(particle.forceRenderingOff,"HUD-camera health outside canvas is ignored");
+   VanillaHud.Spawned(burst,hero);
+   for(int gate=0;gate<5;gate++){
+    if(gate==0)Plugin.Self.Enabled.Value=false;
+    if(gate==1)Plugin.Self.HideOriginalHud.Value=false;
+    if(gate==2)Plugin.Self.Session.Active=false;
+    if(gate==3)GameManager.instance.Gameplay=false;
+    if(gate==4)GameManager.instance.IsLoadingSceneTransition=true;
+    VanillaHud.Spawned(burst,mask);Check(!particle.forceRenderingOff,"native feedback is suppressed outside active replacement HUD");
+    Plugin.Self.Enabled.Value=Plugin.Self.HideOriginalHud.Value=Plugin.Self.Session.Active=GameManager.instance.Gameplay=true;
+    GameManager.instance.IsLoadingSceneTransition=false;
+   }
+   VanillaHud.Spawned(burst,mask);Plugin.Self.HideOriginalHud.Value=false;UnityEngine.Camera.onPreCull(f.Main);
+   Check(!particle.forceRenderingOff&&alreadyHidden.forceRenderingOff,"show-original-HUD cannot restore detached feedback");
+   Plugin.Self.HideOriginalHud.Value=true;VanillaHud.Spawned(burst,mask);particle.destroyed=true;
+   VanillaHud.Spawned(burst,hero);VanillaHud.Restore();
+   Check(alreadyHidden.forceRenderingOff,"destroyed pooled renderers corrupt visibility restoration");
+   Console.WriteLine("HUD feedback: detached native bursts hidden before render, world focus/journal untouched, pool reuse and disable restore original flags.");
+  }finally{VanillaHud.Uninstall();}
+ }
+ static void HudSpawnHooks(){
+  var f=new Fixture(2);var canvas=new GameObject("HUD canvas");GameCameras.instance.hudCanvas=canvas;
+  var mask=Child("Health",canvas.transform);var hero=new GameObject("Hero");var prior=new GameObject("Prior caller");
+  var burst=new GameObject("Detached effect");var particle=burst.Add<ParticleSystemRenderer>();
+  var hudAction=new HutongGames.PlayMaker.Actions.SpawnObjectFromGlobalPool{Fsm=new(){GameObject=mask}};
+  var worldAction=new HutongGames.PlayMaker.Actions.SpawnObjectFromGlobalPool{Fsm=new(){GameObject=hero}};
+  VanillaHud.SpawnSource=prior;
+  try{
+   SpawnHookHost.SpellPoolAction(a=>{
+    Check(VanillaHud.SpawnSource==mask,"pool hook does not set native HUD source before activation");
+    SpawnHookHost.SpellPoolAction(b=>Check(VanillaHud.SpawnSource==hero,"nested action inherits incorrect HUD ownership"),worldAction);
+    Check(VanillaHud.SpawnSource==mask,"nested pool action does not restore outer HUD source");
+    VanillaHud.Spawned(burst,VanillaHud.SpawnSource);
+   },hudAction);
+   Check(particle.forceRenderingOff&&VanillaHud.SpawnSource==prior,"pool action loses caller scope or fails to hide effect");
+   bool threw=false;try{SpawnHookHost.SpellPoolAction(a=>throw new InvalidOperationException("fixture"),hudAction);}catch(InvalidOperationException){threw=true;}
+   Check(threw&&VanillaHud.SpawnSource==prior,"pool exception leaks HUD ownership to unrelated spawns");
+   VanillaHud.Spawned(burst,hero);
+   var stored=new FsmGameObject();var create=new HutongGames.PlayMaker.Actions.CreateObject{Fsm=new(){GameObject=mask},storeObject=stored};
+   SpawnHookHost.SpellCreateAction(a=>a.storeObject.Value=burst,create);
+   Check(particle.forceRenderingOff&&ReferenceEquals(stored,create.storeObject)&&stored.Value==burst,"CreateObject observer changes native stored result or misses healing effect");
+   VanillaHud.Spawned(burst,hero);create.Fsm.GameObject=hero;
+   SpawnHookHost.SpellCreateAction(a=>a.storeObject.Value=burst,create);
+   Check(!particle.forceRenderingOff,"world CreateObject is hidden by a previous HUD context");
+  }finally{VanillaHud.SpawnSource=null;VanillaHud.Restore();}
  }
  sealed class Entry { internal int Order; internal Transform Root; internal int Owner; internal bool Busy = true; }
  static Entry[] Legacy(List<Entry> entries, Transform source) => entries.Where(e => e.Root && source.IsChildOf(e.Root)).ToArray();
@@ -572,7 +641,7 @@ static class Test {
   Console.WriteLine("Controlled hierarchy benchmark: legacy=" + oldMs.ToString("F1") + "ms, indexed=" + watch.Elapsed.TotalMilliseconds.ToString("F1") + "ms; legacy hierarchy tests=" + legacyTests + "; steady allocations=" + allocated + " bytes. Not an in-game FPS measurement.");
  }
  static void Main() {
-  Masks(); Lifetimes(); StoryAndOwnership(); RealIntegration(); CaptureIsolation(); Background(); BlurredComposition(); GraphicsBudget(); HudBudget(); Hierarchy(); Benchmark();
+  Masks(); Lifetimes(); StoryAndOwnership(); RealIntegration(); CaptureIsolation(); Background(); BlurredComposition(); GraphicsBudget(); HudBudget(); HudFeedback(); HudSpawnHooks(); Hierarchy(); Benchmark();
   Console.WriteLine("PASS " + checks + " Focus/camera/interaction regression checks");
  }
 }

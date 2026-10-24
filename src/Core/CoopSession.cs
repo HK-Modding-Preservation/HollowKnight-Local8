@@ -88,6 +88,12 @@ internal sealed class CoopSession : IDisposable
 				}
 				try
 				{
+					if (!coopSession.TryJoinDestination(s, out var landing))
+					{
+						coopSession.DelaySpawn(s);
+						return false;
+					}
+					s.Hero.transform.position = landing;
 					Hooks.RebindActor(s);
 					PaleCourtInterop.RepairClone(coopSession, s);
 					using (PlayerContext.Enter(s))
@@ -97,6 +103,12 @@ internal sealed class CoopSession : IDisposable
 						s.Hero.CharmUpdate();
 						coopSession.Data.health = Math.Min(Math.Max(1, health), coopSession.Data.CurrentMaxHealth);
 						coopSession.Data.healthBlue = healthBlue;
+						if (!coopSession.TryJoinDestination(s, out landing))
+						{
+							coopSession.DelaySpawn(s);
+							return false;
+						}
+						s.Hero.transform.position = landing;
 						ActorRecovery.Reset(s);
 						s.Hero.AcceptInput();
 						s.Hero.AffectedByGravity(gravityApplies: true);
@@ -111,10 +123,15 @@ internal sealed class CoopSession : IDisposable
 						}
 						s.Hero.GetComponent<Rigidbody2D>().velocity = Vector2.zero;
 					}
+					if (!coopSession.TryJoinDestination(s, out landing))
+					{
+						coopSession.DelaySpawn(s);
+						return false;
+					}
+					s.Hero.transform.position = landing;
 					PlayerLighting.Sync(coopSession.Primary, s);
 					s.Ready = true;
 					s.ProtectionUntil = Time.time + 2f;
-					s.Hero.transform.position = coopSession.JoinDestination();
 					if (float.IsPositiveInfinity(s.JoinVisualUntil))
 					{
 						s.JoinVisualUntil = (coopSession.plugin.Panel ? 0f : (Time.unscaledTime + 0.65f));
@@ -185,6 +202,8 @@ internal sealed class CoopSession : IDisposable
 	private int ownerFrame = -1;
 
 	private HeroActions originalActions;
+
+	internal HeroActions OriginalActions => originalActions;
 
 	private string scene;
 
@@ -343,6 +362,7 @@ internal sealed class CoopSession : IDisposable
 			{
 				Diagnostics.Snapshot(this, "exit-to-menu");
 				Dispose();
+				plugin.Lobby.Clear();
 			}
 		}
 		else if (!gm.hero_ctrl || !gm.IsGameplayScene() || gm.IsLoadingSceneTransition)
@@ -400,6 +420,7 @@ internal sealed class CoopSession : IDisposable
 				Hooks.PatchActor(playerSlot.Hero.gameObject);
 				playerSlot.RootLayer = playerSlot.Hero.gameObject.layer;
 			}
+			plugin.Lobby.Apply(this);
 			if (suspended)
 			{
 				suspended = false;
@@ -423,16 +444,7 @@ internal sealed class CoopSession : IDisposable
 			if (Time.unscaledTime >= bindingCheck)
 			{
 				bindingCheck = Time.unscaledTime + 1f;
-				string text = Controls.Signature(originalActions);
-				if (bindingSignature != null && text != bindingSignature)
-				{
-					foreach (PlayerSlot player in Players)
-					{
-						Controls.RebindPrimary(player, originalActions, player.Device);
-					}
-					plugin.Notice("Controles vanilla actualizados.");
-				}
-				bindingSignature = text;
+				RefreshBindings();
 			}
 			Charms.InputTick(this);
 			bool flag = Gameplay && Players.Any((PlayerSlot p) => (bool)p.Hero && p.Vitals.AtBench && ConfirmedBench(p));
@@ -449,6 +461,9 @@ internal sealed class CoopSession : IDisposable
 			}
 			if (!Active)
 			{
+				bool nativeInventory = Charms.NativeMenuOpen;
+				gm.inputHandler.inputActions = Gameplay || nativeInventory ? Primary.Actions : originalActions;
+				Controls.Pump(Primary, plugin.Panel || !Gameplay && !nativeInventory);
 				return;
 			}
 			NativeQuickMap.Observe(this);
@@ -487,6 +502,7 @@ internal sealed class CoopSession : IDisposable
 			}
 			CoopEnding.Tick(this);
 			ArenaGather.Tick(this);
+			HornetEncounterFlow.Tick(this);
 			if (flag2 || plugin.Panel)
 			{
 				if (!perfSuspended)
@@ -547,6 +563,7 @@ internal sealed class CoopSession : IDisposable
 			}
 			InteractionRouter.ObserveBenches();
 			BenchSeats.Tick(this);
+			FallingPlatformHazard.Tick(this);
 			WorldRouting.Tick(this);
 			PlayerSlot[] array = framePlayers.Snapshot(Players);
 			foreach (PlayerSlot p2 in array)
@@ -650,6 +667,8 @@ internal sealed class CoopSession : IDisposable
 			}
 			AcidSwimming.GuardPrimary();
 			AcidSwimming.GuardPrimaryPosition();
+			EntryGravityRecovery.Tick(this);
+			TerrainEmbedRecovery.Tick(this);
 			SummonRouting.Tick(this);
 			if (PvpMatch.Tick(this))
 			{
@@ -770,7 +789,7 @@ internal sealed class CoopSession : IDisposable
 	private void CheckStuckControl(PlayerSlot p)
 	{
 		UIManager instance = UIManager.instance;
-		if (!Gameplay || !p.Alive || !p.Connected || p.Actions == null || p.InputBlocked || p.Hero.cState.transitioning || p.Hero.IsDreamReturning || DreamSequence.InStoryDream || ScriptedParty.Active || CoopEnding.Active || PvpMatch.Running || EmergencyWarp.Active(p) || TransitionVote.Holding(p) || BenchSeats.Seated(p) || PickupCard.Owner == p || InteractionRouter.Holds(p) || Charms.NativeMenuOpen || ShopMenuRouting.MenuVisible && ShopMenuRouting.Buyer == p || StagMenuRouting.HasOwner || !instance || instance.uiState != UIState.PLAYING || Mathf.Abs(p.Actions.moveVector.X) < 0.35f)
+		if (!Gameplay || !p.Alive || !p.Connected || p.Actions == null || p.InputBlocked || p.Hero.cState.transitioning || p.Hero.IsDreamReturning || DreamSequence.InStoryDream || ScriptedParty.Active || CoopEnding.Active || PvpMatch.Running || EmergencyWarp.Active(p) || TransitionVote.Holding(p) || BenchSeats.Seated(p) || PickupCard.Owner == p || InteractionRouter.Holds(p) || HornetEncounterFlow.Holds(p) || Charms.NativeMenuOpen || ShopMenuRouting.MenuVisible && ShopMenuRouting.Buyer == p || StagMenuRouting.HasOwner || !instance || instance.uiState != UIState.PLAYING || Mathf.Abs(p.Actions.moveVector.X) < 0.35f)
 		{
 			stuckSince.Remove(p);
 			stuckPosition.Remove(p);
@@ -918,10 +937,38 @@ internal sealed class CoopSession : IDisposable
 		}
 	}
 
+	private void RefreshBindings()
+	{
+		string signature = Controls.Signature(originalActions);
+		if (bindingSignature != null && signature != bindingSignature)
+		{
+			foreach (PlayerSlot player in Players)
+			{
+				HeroActions previous = player.Actions;
+				string reservation = player.DeviceKey;
+				bool awaitingPrimary = player == Primary && Controls.IsKeyboard(player.Device) && reservation != "Keyboard";
+				Controls.RebindPrimary(player, originalActions, player.Device);
+				if (awaitingPrimary) player.DeviceKey = reservation;
+				var game = GameManager.instance;
+				if (game && game.inputHandler && game.inputHandler.inputActions == previous)
+					game.inputHandler.inputActions = player.Actions;
+			}
+		}
+		bindingSignature = signature;
+	}
+
 	private void InitializePrimaryInput(PlayerSlot player)
 	{
-		InputDevice device = PrimaryController.Resolve(plugin.PrimaryDevice.Value, Controls.Devices(), InputManager.ActiveDevice);
+		var joined = plugin.Lobby.Primary;
+		bool usedPad = originalActions.LastInputType == BindingSourceType.DeviceBindingSource || originalActions.LastInputType == BindingSourceType.UnknownDeviceBindingSource;
+		InputDevice device = joined != null ? joined.Device : PrimaryController.Resolve(plugin.PrimaryDevice.Value, Controls.Devices(), usedPad ? originalActions.ActiveDevice : InputDevice.Null);
 		Controls.InitPrimary(player, originalActions, device ?? InputDevice.Null);
+		if (joined != null)
+		{
+			player.DeviceKey = joined.Key;
+			plugin.PrimaryDevice.Value = PrimaryController.Automatic;
+			return;
+		}
 		// A missing saved pad may temporarily use keyboard, but keeps its key
 		// so reconnecting restores the right pad and its controller bindings.
 		if (device == null) player.DeviceKey = plugin.PrimaryDevice.Value;
@@ -952,15 +999,13 @@ internal sealed class CoopSession : IDisposable
 
 	private void HandleControllerJoin(InputDevice device)
 	{
-		if (Primary == null || plugin.Panel || !Controls.JoinPressed(device) || Players.Any(p => p.Device == device) || !CanJoin) return;
-		if (PrimaryController.ClaimFirstJoin(plugin.PrimaryDevice.Value, Players.Count, Primary.Device)) AssignPrimary(device, false);
-		else Join(device);
+		if (Primary == null || MenuInput.Waiting || ActionKeys.Capturing != 0 || !Controls.JoinPressed(device) || Players.Any(p => p.Device == device) || !CanJoin) return;
+		Join(device);
 	}
 
 	internal void AssignPrimaryAutomatic()
 	{
-		InputDevice device = PrimaryController.Resolve(PrimaryController.Automatic, Controls.Devices(), InputManager.ActiveDevice);
-		if (AssignPrimary(device, false)) plugin.PrimaryDevice.Value = PrimaryController.Automatic;
+		plugin.PrimaryDevice.Value = PrimaryController.Automatic;
 	}
 
 	internal bool AssignPrimary(InputDevice device, bool remember = true)
@@ -969,90 +1014,27 @@ internal sealed class CoopSession : IDisposable
 		{
 			return false;
 		}
-		if (device == InputDevice.Null)
+		if (Primary.Device == device && Primary.DeviceKey == Controls.Key(device))
 		{
-			int num = 0;
-			if (Players.Count > 1)
-			{
-				num += (Controls.IsKeyboard(Players[1].Device) ? 1 : 0);
-			}
-			if (Players.Count > 2)
-			{
-				num += (Controls.IsKeyboard(Players[2].Device) ? 1 : 0);
-			}
-			if (Players.Count > 3)
-			{
-				num += (Controls.IsKeyboard(Players[3].Device) ? 1 : 0);
-			}
-			if (Players.Count > 4)
-			{
-				num += (Controls.IsKeyboard(Players[4].Device) ? 1 : 0);
-			}
-			if (Players.Count > 5)
-			{
-				num += (Controls.IsKeyboard(Players[5].Device) ? 1 : 0);
-			}
-			if (Players.Count > 6)
-			{
-				num += (Controls.IsKeyboard(Players[6].Device) ? 1 : 0);
-			}
-			if (Players.Count > 7)
-			{
-				num += (Controls.IsKeyboard(Players[7].Device) ? 1 : 0);
-			}
-			if (num >= 4)
-			{
-				return false;
-			}
+			if (remember) plugin.PrimaryDevice.Value = Primary.DeviceKey;
+			return true;
 		}
-		PlayerSlot displaced = device == InputDevice.Null ? null : Players.Skip(1).FirstOrDefault(p => p.Device == device);
-		InputDevice previousDevice = Primary.Device ?? InputDevice.Null;
+		PlayerSlot displaced = device == InputDevice.Null
+			? (Controls.IsKeyboard(Primary.Device) ? null : Players.Skip(1).Where(p => Controls.IsKeyboard(p.Device)).OrderBy(p => p.KeyboardProfile == 0 ? 0 : 1).FirstOrDefault())
+			: Players.Skip(1).FirstOrDefault(p => p.Device == device);
+		if (device == InputDevice.Null && displaced == null && Players.Skip(1).Count(p => Controls.IsKeyboard(p.Device)) >= 4) return false;
 		HeroActions previousActions = Primary.Actions;
-		Controls.RebindPrimary(Primary, originalActions, device);
-		if (displaced != null)
-		{
-			// Exchange controls, never players, profiles, health or progression.
-			Controls.Dispose(displaced);
-			Controls.InitSecondary(displaced, originalActions, previousDevice);
-		}
-		if (Players.Count > 1 && Controls.IsKeyboard(Players[1].Device))
-		{
-			Controls.Dispose(Players[1]);
-			Controls.InitSecondary(Players[1], originalActions, InputDevice.Null);
-		}
-		if (Players.Count > 2 && Controls.IsKeyboard(Players[2].Device))
-		{
-			Controls.Dispose(Players[2]);
-			Controls.InitSecondary(Players[2], originalActions, InputDevice.Null);
-		}
-		if (Players.Count > 3 && Controls.IsKeyboard(Players[3].Device))
-		{
-			Controls.Dispose(Players[3]);
-			Controls.InitSecondary(Players[3], originalActions, InputDevice.Null);
-		}
-		if (Players.Count > 4 && Controls.IsKeyboard(Players[4].Device))
-		{
-			Controls.Dispose(Players[4]);
-			Controls.InitSecondary(Players[4], originalActions, InputDevice.Null);
-		}
-		if (Players.Count > 5 && Controls.IsKeyboard(Players[5].Device))
-		{
-			Controls.Dispose(Players[5]);
-			Controls.InitSecondary(Players[5], originalActions, InputDevice.Null);
-		}
-		if (Players.Count > 6 && Controls.IsKeyboard(Players[6].Device))
-		{
-			Controls.Dispose(Players[6]);
-			Controls.InitSecondary(Players[6], originalActions, InputDevice.Null);
-		}
-		if (Players.Count > 7 && Controls.IsKeyboard(Players[7].Device))
-		{
-			Controls.Dispose(Players[7]);
-			Controls.InitSecondary(Players[7], originalActions, InputDevice.Null);
-		}
+		HeroActions otherActions = displaced?.Actions;
+		if (displaced == null) Controls.RebindPrimary(Primary, originalActions, device);
+		else Controls.Swap(Primary, displaced, originalActions, device);
 		if (remember) plugin.PrimaryDevice.Value = Primary.DeviceKey;
 		GameManager gm = GameManager.instance;
-		if (gm && gm.inputHandler && gm.inputHandler.inputActions == previousActions) gm.inputHandler.inputActions = Primary.Actions;
+		if (gm && gm.inputHandler)
+		{
+			if (gm.inputHandler.inputActions == previousActions) gm.inputHandler.inputActions = Primary.Actions;
+			else if (displaced != null && gm.inputHandler.inputActions == otherActions) gm.inputHandler.inputActions = displaced.Actions;
+		}
+		Diagnostics.Write("INPUT ASSIGN P1=" + Primary.DeviceName + (displaced != null ? " swapped=P" + (displaced.Index + 1) + ":" + displaced.DeviceName : ""));
 		plugin.Notice("P1: " + Primary.DeviceName);
 		return true;
 	}
@@ -1250,6 +1232,11 @@ internal sealed class CoopSession : IDisposable
 		{
 			return;
 		}
+		if (!TryJoinDestination(s, out var spawnAt))
+		{
+			s.RetryAt = Time.unscaledTime + 0.15f;
+			return;
+		}
 		s.SpawnPending = true;
 		s.SpawnAsDown = s.Down;
 		s.Retiring = false;
@@ -1272,7 +1259,7 @@ internal sealed class CoopSession : IDisposable
 			spawnMetrics.Mark("interop_prepare");
 			GameObject gameObject2;
 			using (NativeParticleCopy.Begin(gameObject))
-				gameObject2 = UnityEngine.Object.Instantiate(gameObject, JoinDestination(), gameObject.transform.rotation);
+				gameObject2 = UnityEngine.Object.Instantiate(gameObject, spawnAt, gameObject.transform.rotation);
 			spawnMetrics.Mark("instantiate");
 			s.Hero = gameObject2.GetComponent<HeroController>();
 			gameObject2.name = "Knight P" + (s.Index + 1);
@@ -1410,8 +1397,21 @@ internal sealed class CoopSession : IDisposable
 		}
 	}
 
+	private void DelaySpawn(PlayerSlot p)
+	{
+		if (p.SpawnAsDown) p.Down = true;
+		Park(p);
+		p.RetryAt = Time.unscaledTime + 0.15f;
+		Diagnostics.Write("SPAWN delayed P" + (p.Index + 1) + " waiting for safe landing");
+	}
+
 	private void ResumeParked(PlayerSlot p)
 	{
+		if (!TryJoinDestination(p, out var spawnAt))
+		{
+			p.RetryAt = Time.unscaledTime + 0.15f;
+			return;
+		}
 		p.SpawnPending = true;
 		p.SpawnAsDown = p.Down;
 		p.Down = false;
@@ -1425,7 +1425,7 @@ internal sealed class CoopSession : IDisposable
 		var spawnMetrics = new SpawnMetrics(p, true);
 		try
 		{
-			p.Hero.transform.position = JoinDestination();
+			p.Hero.transform.position = spawnAt;
 			using (PlayerContext.Enter(p))
 			{
 				p.Hero.gameObject.SetActive(value: true);
@@ -1842,12 +1842,13 @@ internal sealed class CoopSession : IDisposable
 		ArenaVisualRecovery.Downed(p);
 	}
 
-	internal void Hazard(PlayerSlot p)
+	internal void Hazard(PlayerSlot p, HazardType kind = HazardType.SPIKES, float angle = 0f)
 	{
 		//Discarded unreachable code: IL_0070
 		CrystalDashCoop.StopPlayer(p);
 		if (!p.Down && !p.Hazard)
 		{
+			HazardFeedback.Play(p, kind, angle);
 			p.LastHazardPosition = p.Hero.transform.position;
 			EmergencyWarp.Cancel(p);
 			BenchSeats.Leave(p);
@@ -1921,7 +1922,7 @@ internal sealed class CoopSession : IDisposable
 		}
 		else if (respawn && playerSlot != null)
 		{
-			if (!NearAlly(playerSlot, p, out result))
+			if (!SpawnSafety.Living(this, p, out result))
 			{
 				p.HazardUntil = Time.time + 0.3f;
 				return;
@@ -1983,6 +1984,7 @@ internal sealed class CoopSession : IDisposable
 		}
 		Commit(p);
 		Vector3 position2 = p.Hero.transform.position;
+		WorldRouting.LocalRecovery(p);
 		NativeDreamFx.TeleportTrail(p, position2, result);
 		using (PlayerContext.Enter(p))
 		{
@@ -2282,42 +2284,17 @@ internal sealed class CoopSession : IDisposable
 	internal bool FindSafePosition(Vector3 origin, PlayerSlot p, out Vector3 result, Vector3? avoid = null)
 	{
 		result = Vector3.zero;
-		if (!p.Hero)
+		if (p == null || !p.Hero)
 		{
 			return false;
 		}
+		Physics2D.SyncTransforms();
 		if ((!avoid.HasValue || Vector2.Distance(origin, avoid.Value) > 3.5f) && IsSafe(origin, p))
 		{
 			result = origin;
 			return true;
 		}
-		GameManager instance = GameManager.instance;
-		if (!instance || !instance.cameraCtrl)
-		{
-			return false;
-		}
-		origin.x = Mathf.Clamp(origin.x, 1f, Mathf.Max(1f, instance.cameraCtrl.sceneWidth - 1f));
-		origin.y = Mathf.Clamp(origin.y, 1f, Mathf.Max(1f, instance.cameraCtrl.sceneHeight - 1f));
-		Bounds bounds = DuelGround.Body(p);
-		float num = bounds.extents.y - (bounds.center.y - p.Hero.transform.position.y);
-		for (int i = 0; i <= 24; i++)
-		{
-			for (int j = -1; j <= 1; j += 2)
-			{
-				float x = origin.x + (float)(i * j);
-				RaycastHit2D raycastHit2D = Physics2D.Raycast(new Vector2(x, Mathf.Min(instance.cameraCtrl.sceneHeight - 0.2f, origin.y + 3f)), Vector2.down, 20f, 256);
-				if ((bool)raycastHit2D.collider && !raycastHit2D.collider.isTrigger && !(raycastHit2D.normal.y < 0.6f))
-				{
-					Vector3 vector = new Vector3(x, raycastHit2D.point.y + num + 0.06f, origin.z);
-					if ((!avoid.HasValue || Vector2.Distance(vector, avoid.Value) > 3.5f) && IsSafe(vector, p))
-					{
-						result = vector;
-						return true;
-					}
-				}
-			}
-		}
-		return false;
+		return SpawnSafety.Floor(this, p, origin, out result, avoid);
 	}
 
 	internal PlayerSlot LongestLiving(PlayerSlot except)
@@ -2352,57 +2329,14 @@ internal sealed class CoopSession : IDisposable
 		return anchor.Hero.transform.position;
 	}
 
-	private Vector3 JoinDestination()
+	private bool TryJoinDestination(PlayerSlot arriving, out Vector3 at)
 	{
-		if (Primary == null || !Primary.Hero)
-		{
-			return Vector3.zero;
-		}
-		PlayerSlot anchor = ArenaGather.Anchor;
-		if (anchor != null && anchor != Primary && IsSafe(anchor.Hero.transform.position, anchor))
-		{
-			return anchor.Hero.transform.position;
-		}
-		if (Primary.Down)
-		{
-			PlayerSlot playerSlot = Players.FirstOrDefault((PlayerSlot p) => p != Primary && p.Alive && p.Ready && IsSafe(p.Hero.transform.position, p));
-			if (playerSlot != null)
-			{
-				return playerSlot.Hero.transform.position;
-			}
-		}
-		Vector3 vector = ((HasArrival && !Primary.Alive) ? Arrival : Primary.Hero.transform.position);
-		if (IsSafe(vector, Primary))
-		{
-			return vector;
-		}
-		if (Primary.HasSafePoint && Vector2.Distance(vector, Primary.SafePoint) < 8f && IsSafe(Primary.SafePoint, Primary))
-		{
-			return Primary.SafePoint;
-		}
-		GameManager instance = GameManager.instance;
-		if ((bool)instance && (bool)instance.cameraCtrl)
-		{
-			Vector3 vector2 = new Vector3(Mathf.Clamp(vector.x, 1.5f, Mathf.Max(1.5f, instance.cameraCtrl.sceneWidth - 1.5f)), Mathf.Clamp(vector.y, 1.5f, Mathf.Max(1.5f, instance.cameraCtrl.sceneHeight - 1.5f)), vector.z);
-			if (IsSafe(vector2, Primary))
-			{
-				return vector2;
-			}
-			if ((bool)Physics2D.Raycast(new Vector2(vector2.x, vector2.y + 2f), Vector2.down, 12f, 256).collider)
-			{
-				Vector3 vector3 = Primary.Hero.FindGroundPoint(new Vector2(vector2.x, vector2.y + 2f), useExtended: true);
-				if (IsSafe(vector3, Primary))
-				{
-					return vector3;
-				}
-			}
-			return vector2;
-		}
-		return vector;
+		return SpawnSafety.Join(this, arriving, out at);
 	}
 
 	internal void GatherNow()
 	{
+		Physics2D.SyncTransforms();
 		PlayerSlot playerSlot = Players.FirstOrDefault((PlayerSlot p) => p.Alive && p.HasSafePoint);
 		if (playerSlot == null)
 		{

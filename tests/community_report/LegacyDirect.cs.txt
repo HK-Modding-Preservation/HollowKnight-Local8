@@ -1,0 +1,20 @@
+	internal static bool Direct(CoopSession s, PlayerSlot p, GameManager manager, GameManager.SceneLoadInfo info)
+	{
+		if (Holding(p))
+		{
+			return true;
+		}
+		if (info != null && (BossFlow(info.SceneName) || DreamFlow(info.SceneName)))
+		{
+			return false;
+		}
+		if (info == null || info.GetType() != typeof(GameManager.SceneLoadInfo) || string.IsNullOrEmpty(info.SceneName) || string.IsNullOrEmpty(info.EntryGateName) || !CanDefer(s, p) || ScriptedParty.Active || CoopEnding.Active || ArenaGather.TransferActive)
+		{
+			return false;
+		}
+		Add(p, info.SceneName, delegate
+		{
+			manager.BeginSceneTransition(info);
+		});
+		return true;
+	}

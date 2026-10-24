@@ -28,8 +28,8 @@ code = header+'internal static class Hooks {'+common+extract(hooks,'private stat
 code += 'internal static class LegacyHooks {'+common+(here/'LegacyHeroFrame.cs.txt').read_text()+'}'
 world = (root/'src/Core/WorldRouting.cs').read_text()
 code += '''internal static class WorldRouting {internal static Fsm Current;internal static PlayerSlot warp;internal static Vector3 warpAt;internal static float warpTime;
-internal struct Call {internal Fsm Previous;internal PlayerSlot Player;internal Vector3 Position;internal int RoarScope;}
-'''+extract(world,'internal static Call Begin(')+extract(world,'internal static void End(')+(here/'LegacyWorldEnd.cs.txt').read_text()+'}'
+private static readonly int[] localMoves=new int[8];private static readonly bool[] sampled=new bool[8];private static readonly Vector3[] previous=new Vector3[8];
+'''+extract(world,'internal struct Call')+extract(world,'internal static void LocalRecovery(')+extract(world,'internal static Call Begin(')+extract(world,'internal static void End(')+extract(world,'internal static void ObserveFrame(')+(here/'LegacyWorldEnd.cs.txt').read_text()+'}'
 session = (root/'src/Core/CoopSession.cs').read_text()
 code += 'internal static class PulseUnderTest {internal static void New(PlayerSlot p2,GameManager gm){'+extract(session,'if (Time.unscaledTime - p2.LastDamageAt > 4f')+'}internal static void Old(PlayerSlot p2,GameManager gm){'+(here/'LegacyPulse.cs.txt').read_text()+'}}}'
 with tempfile.TemporaryDirectory(prefix='local8-impact-fps-') as folder:

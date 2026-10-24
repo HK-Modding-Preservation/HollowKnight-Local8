@@ -25,7 +25,7 @@ interaction=(source/'src/Core/InteractionRouter.cs').read_text()
 choose=extract(interaction,'private static void Choose(')
 legacy=choose.replace('Valid(player) && Request(e, player) && (Eligible(e, player) || player == touched)','Valid(player) && (Eligible(e, player) || player == touched) && Request(e, player)').replace('private static void Choose(','private static void ChooseLegacy(')
 code+='internal static class InteractionUnderTest {internal static Entry active;internal static int EligibleCalls;internal static void Run(Entry e,PlayerSlot touched)=>Choose(e,touched);internal static void RunLegacy(Entry e,PlayerSlot touched)=>ChooseLegacy(e,touched);private static bool Valid(PlayerSlot p)=>p!=null&&p.Valid;private static bool Eligible(Entry e,PlayerSlot p){EligibleCalls++;return p.Eligible;}private static bool Inside(Entry e,PlayerSlot p)=>Valid(p)&&p.Inside;private static bool BenchSeatNear(Fsm f,PlayerSlot p)=>p.Seat;private static bool CompetingPrompt(PlayerSlot p,Entry e)=>p.Competing;private static Vector2 PromptAnchor(Entry e,Vector2 at)=>new Vector2(0,0);private static string Kind(Fsm f)=>(f.Name+" "+f.GameObject.name).ToLowerInvariant();private static void Refresh(Entry e){}'
-code+=extract(interaction,'private static bool Request(')+choose+legacy+'}}'
+code+='internal static bool TestRequest(Entry e,PlayerSlot p)=>Request(e,p);'+extract(interaction,'private static bool Request(')+choose+legacy+'}}'
 with tempfile.TemporaryDirectory(prefix='local8-optimized-fps-')as folder:
  out=Path(folder);(out/'Extracted.cs').write_text(code)
  options=['-nologo','-target:exe','-langversion:latest','-optimize+','-out:'+str(out/'Test.dll')]

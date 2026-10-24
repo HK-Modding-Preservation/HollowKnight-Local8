@@ -75,7 +75,7 @@ class NativeProbe {
  static void Sensors(){
   foreach(int count in new[]{2,4,5,8}){
    var s=Party(count);foreach(var p in s.Players)p.Hero.transform.position=new(0,0,0);
-   var alert=Sensor<AlertRange>(new());var wake=Sensor<EnemyWakeRegion>(new());
+   var alert=Sensor<AlertRange>(new(0,0,2));var wake=Sensor<EnemyWakeRegion>(new(0,0,-2));
    foreach(var p in s.Players){alert.OnTriggerEnter2D(p.Hero.GetComponent<Collider2D>());wake.OnTriggerEnter2D(p.Hero.GetComponent<Collider2D>());}Check(alert.IsHeroInRange&&wake.fsm.LastEvent=="WAKE","all occupants enter");
    foreach(var p in s.Players.Take(count-1)){p.Hero.transform.position=new(100,0,0);alert.OnTriggerExit2D(p.Hero.GetComponent<Collider2D>());wake.OnTriggerExit2D(p.Hero.GetComponent<Collider2D>());Check(alert.IsHeroInRange&&wake.fsm.LastEvent=="WAKE","one exit cannot forget remaining occupants");}
    var last=s.Players.Last();last.Hero.transform.position=new(100,0,0);alert.OnTriggerExit2D(last.Hero.GetComponent<Collider2D>());wake.OnTriggerExit2D(last.Hero.GetComponent<Collider2D>());Check(!alert.IsHeroInRange&&wake.fsm.LastEvent=="SLEEP","last exit clears alert and sends sleep");
@@ -91,7 +91,7 @@ class NativeProbe {
    walker.lineOfSightDetector=go.Add<LineOfSightDetector>();walker.alertRange=Sensor<AlertRange>(new(),100);walker.alertRange.OnTriggerEnter2D(p.Hero.GetComponent<Collider2D>());walker.currentFacing=-1;p.Hero.transform.position=new(3,0,0);FreshFrame();walker.UpdateWalking();Check(Physics2D.LastRayHero==p.Hero&&walker.Turns==1&&walker.LastFacing==1,"Walker facing and native sight query use same guest");Check(HeroController.instance==s.Players[0].Hero,"Walker restores singleton");
    walker.Turns=0;var old=p.Hero;foreach(var q in s.Players)q.Down=true;FreshFrame();walker.UpdateWalking();Check(walker.Turns==0&&!walker.lineOfSightDetector.CanSeeHero,"no eligible target does not chase dead P1");foreach(var q in s.Players)q.Down=false;
    // Force a target change: P1 on the left is visible; guest on right is blocked.
-   p.Hero.transform.position=new(100,0,0);var other=s.Players.First(q=>q!=p);other.Hero.transform.position=new(-2,0,0);FreshFrame();walker.UpdateWalking();p.Hero.transform.position=new(1,0,0);other.Hero.transform.position=new(-20,0,0);Physics2D.Obstructed=h=>h==p.Hero;FreshFrame();walker.Turns=0;walker.UpdateWalking();Check(Physics2D.LastRayHero==p.Hero&&!walker.lineOfSightDetector.CanSeeHero&&walker.Turns==0,"new target behind wall cannot reuse previous target visibility");scenarios++;
+   p.Hero.transform.position=new(100,0,0);var other=s.Players.First(q=>q!=p);other.Hero.transform.position=new(-2,0,0);FreshFrame();walker.UpdateWalking();p.Hero.transform.position=new(1,0,0);other.Hero.transform.position=new(-20,0,0);Physics2D.Obstructed=h=>true;FreshFrame();walker.Turns=0;walker.UpdateWalking();Check(!walker.lineOfSightDetector.CanSeeHero&&walker.Turns==0,"new target behind wall cannot reuse previous target visibility");scenarios++;
   }
  }
  static void Conveyors(){
@@ -137,9 +137,86 @@ class NativeProbe {
   s=Party(2);s.Players[0].Hero.transform.position=new(100,0,0);p=s.Players[1];p.Hero.transform.position=new(6,0,0);var root=new GameObject();root.Add<Rigidbody2D>();root.Add<Collider2D>();wake=root.Add<EnemyWakeRegion>();var child=new GameObject();child.Parent(root);child.Add<Collider2D>().Size=new(20,20,1);wake.OnTriggerEnter2D(p.Hero.GetComponent<Collider2D>());Check(wake.fsm.LastEvent=="WAKE","wake sensor includes trigger attached through child transform");
   scenarios+=15;
  }
+ static void SightRegressions(){
+  foreach(int count in new[]{2,4,8})for(int actor=0;actor<count;actor++){
+   var s=Party(count);foreach(var q in s.Players)q.Hero.transform.position=new(100+q.Index,0,0);
+   var p=s.Players[actor];p.Hero.transform.position=new(3,0,0);var hidden=s.Players.First(q=>q!=p);hidden.Hero.transform.position=new(-1,0,0);
+   var detector=new GameObject().Add<LineOfSightDetector>();var range=Sensor<AlertRange>(new(),12);detector.alertRanges=new[]{range};Physics2D.Obstructed=h=>h==hidden.Hero;
+   // Neither hero receives Enter: reproduce an already-overlapping activation.
+   Check(!range.IsHeroInRange,"negative control has no native range contact");range.isHeroInRange=true;using(PlayerContext.Enter(hidden,enemy:true))detector.Native_Update();Check(!detector.CanSeeHero,"native nearest-only query did not reproduce missed visible actor");range.isHeroInRange=false;detector.Update();
+   Check(detector.CanSeeHero&&EnemySightRouting.Target(new(){GameObject=detector.gameObject})==p,"visible guest defeats occluded nearest actor with coherent FSM target");
+   Check(HeroController.instance==s.Players[0].Hero&&PlayerContext.Current==null,"multi-candidate native LOS restores context");
+   int rays=Physics2D.Raycasts,distances=Physics2D.DistanceCalls;for(int n=0;n<100;n++)detector.Update();
+   Check(rays==Physics2D.Raycasts&&distances==Physics2D.DistanceCalls,"same-frame sight reads reuse bounded sensor query");
+   p.Hero.transform.position=new(20,0,0);FreshFrame();detector.Update();Check(!detector.CanSeeHero,"hero outside native range does not authorize sight through nearby obstructed hero");
+   hidden.Holding=true;FreshFrame();detector.Update();Check(!detector.CanSeeHero&&!range.IsHeroInRange,"waiting actor does not keep enemies alert");hidden.Holding=false;
+   p.Hero.transform.position=new(3,0,0);FreshFrame();var action=new CheckAlertRange();action.alertRange.Value=range;action.Apply();Check(action.storeResult.Value,"native alert action repairs missing enter");
+   p.Hero.transform.position=new(20,0,0);hidden.Hero.transform.position=new(30,0,0);FreshFrame();action.Apply();Check(!action.storeResult.Value,"native alert action repairs missing exit");
+   var root=new GameObject();range.gameObject.Name="Range";range.gameObject.Parent(root);p.Hero.transform.position=new(3,0,0);FreshFrame();var named=new CheckAlertRangeByName{Owner=root,childName="Range"};named.Apply();Check(named.storeResult.Value,"named alert action repairs overlapping activation");
+   Physics2D.Obstructed=h=>true;FreshFrame();detector.Update();Check(!detector.CanSeeHero,"all native wall obstructions preserved");scenarios++;
+  }
+ }
+ static void ReviewRegressions(){
+  foreach(int count in new[]{2,4,8})for(int actor=0;actor<count;actor++){
+   var s=Party(count);foreach(var p in s.Players)p.Hero.transform.position=new(100+p.Index,0,0);
+   var visible=s.Players[actor];visible.Hero.transform.position=new(2,0,0);
+   var detector=new GameObject().Add<LineOfSightDetector>();var range=Sensor<AlertRange>(new(),12);detector.alertRanges=new[]{range};
+   detector.Update();Check(detector.CanSeeHero,"review setup did not see actual actor");
+   visible.Hero.transform.position=new(30,0,0);range.OnTriggerExit2D(visible.Hero.GetComponent<Collider2D>());detector.Update();
+   Check(!detector.CanSeeHero,"same-frame range exit reused a stale visible target");
+   visible.Hero.transform.position=new(2,0,0);range.OnTriggerEnter2D(visible.Hero.GetComponent<Collider2D>());detector.Update();
+   Check(detector.CanSeeHero,"same-frame range entry reused a stale empty target");
+   int rays=Physics2D.Raycasts,distances=Physics2D.DistanceCalls;for(int i=0;i<100;i++)detector.Update();
+   Check(rays==Physics2D.Raycasts&&distances==Physics2D.DistanceCalls,"review contact invalidation disabled unchanged same-frame caching");
+   visible.Holding=true;visible.Hero.transform.position=new(0,0,0);var go=new GameObject();var walker=go.Add<Walker>();walker.waitForHeroX=true;walker.waitHeroX=0;
+   FreshFrame();walker.Start();Check(!walker.didFulfilHeroXCondition&&walker.Begins==0,"hidden room voter activated native Walker threshold");
+   var present=s.Players.First(p=>p!=visible);present.Hero.transform.position=new(.5f,0,0);FreshFrame();walker.UpdateWaitingForConditions();
+   Check(walker.didFulfilHeroXCondition&&walker.Begins==1,"visible living actor did not satisfy unchanged native Walker threshold");
+   Check(HeroController.instance==s.Players[0].Hero&&PlayerContext.Current==null,"review AI callback leaked actor context");
+   scenarios++;
+  }
+ }
  static void Lifecycle(){
   var s=Party(2);s.Active=false;var guest=s.Players[1].Hero;guest.cState.superDashing=true;Check(!GrassCut.ShouldCut(Box(guest)),"inactive session preserves native singleton behavior");
   WorldContactRouting.Uninstall();WorldContactRouting.Uninstall();Check(On.TinkEffect.Count_OnTriggerEnter2D==0&&On.ShadowGateColliderControl.Count_FixedUpdate==0&&On.AlertRange.Count_OnTriggerExit2D==0&&On.Walker.Count_UpdateWalking==0,"all hooks removed idempotently");WorldContactRouting.Install();Check(On.TinkEffect.Count_OnTriggerEnter2D==1,"reinstall balanced");WorldContactRouting.Uninstall();
  }
- static void Main(){Baseline();Contacts();Slopes();Gates();Sensors();Walkers();Conveyors();EdgeCases();Lifecycle();Console.WriteLine($"PASS world_interactions checks={checks}; corrected scenarios={scenarios}; exact native IL with production hooks; Unity dependencies simulated.");}
+ static void NativeSensorRegressions(){
+  foreach(int count in new[]{2,4,8})for(int actor=0;actor<count;actor++)foreach(bool disabled in new[]{false,true}){
+   var s=Party(count);foreach(var q in s.Players)q.Hero.transform.position=new(100,0,0);
+   var p=s.Players[actor];p.Hero.transform.position=new(7,0,0);
+   var box=Box(p.Hero);box.gameObject.Add<HeroBox>();box.transform.position=new(5.8f,0,-.02f);
+   var range=Sensor<AlertRange>(new(0,0,2),12);range.enabled=!disabled;
+   var detector=new GameObject().Add<LineOfSightDetector>();detector.alertRanges=new[]{range};
+   range.Native_OnTriggerEnter2D(box);using(PlayerContext.Enter(p,enemy:true))detector.Native_Update();
+   Check(range.IsHeroInRange&&detector.CanSeeHero,"native child-body negative control did not recognize real trigger contact");
+   range.isHeroInRange=false;range.OnTriggerEnter2D(box);detector.Update();
+   Check(range.IsHeroInRange&&detector.CanSeeHero,"party routing discarded native HeroBox/disabled-behavior detection");
+   Check(PartySensorOccupancy.Contains(range,p),"LOS per-actor mask lost HeroBox-only occupancy");
+   var wake=Sensor<EnemyWakeRegion>(new(0,0,2),12);wake.enabled=!disabled;wake.OnTriggerEnter2D(box);
+   Check(wake.fsm.LastEvent=="WAKE","disabled behavior suppressed native wake trigger");
+   FreshFrame();PartySensorOccupancy.Tick();Check(range.IsHeroInRange&&wake.fsm.LastEvent=="WAKE","sensor sweep removed a live disabled-behavior sensor");
+   box.transform.position=new(100,0,0);range.OnTriggerExit2D(box);wake.OnTriggerExit2D(box);FreshFrame();detector.Update();
+   Check(!range.IsHeroInRange&&!detector.CanSeeHero&&wake.fsm.LastEvent=="SLEEP","last HeroBox exit left enemy awake");
+   var nail=Nail(p.Hero,0);nail.transform.position=new(5.8f,0,0);range.OnTriggerEnter2D(nail);FreshFrame();detector.Update();
+   Check(!range.IsHeroInRange&&!detector.CanSeeHero,"nail attack was mistaken for a body in enemy range");
+   scenarios++;
+  }
+ }
+ static void MossChargerRange(){
+  // Native Mossy Control detaches Attack Range from its hidden body, then
+  // polls CheckAlertRange in Hidden. No new Enter callback is guaranteed.
+  foreach(int count in new[]{2,4,8})for(int actor=0;actor<count;actor++){
+   var s=Party(count);foreach(var p in s.Players)p.Hero.transform.position=new(100,0,0);
+   var boss=new GameObject();var body=boss.Add<Collider2D>();body.enabled=false;
+   var range=Sensor<AlertRange>(new(0,0,0),20);range.gameObject.Parent(boss);range.transform.parent=null;
+   var near=s.Players[actor];near.Hero.transform.position=new(2,0,0);
+   var action=new CheckAlertRange();action.alertRange.Value=range;action.Native_Apply();Check(!action.storeResult.Value,"native Mossy Hidden negative control did not miss absent Enter");
+   FreshFrame();action.Apply();Check(action.storeResult.Value&&!body.enabled,"detached Mossy attack range did not detect the actual nearby actor");
+   var other=s.Players.First(p=>p!=near);other.Hero.transform.position=new(-2,0,0);near.Hero.transform.position=new(100,0,0);
+   FreshFrame();action.Apply();Check(action.storeResult.Value,"one player leaving cancelled another player's Mossy detection");
+   other.Hero.transform.position=new(100,0,0);FreshFrame();action.Apply();Check(!action.storeResult.Value,"Mossy attack range remained occupied after the last actor left");
+   Check(HeroController.instance==s.Players[0].Hero&&PlayerContext.Current==null,"Mossy range leaked a player context");scenarios++;
+  }
+ }
+ static void Main(){Baseline();Contacts();Slopes();Gates();Sensors();Walkers();Conveyors();EdgeCases();SightRegressions();ReviewRegressions();NativeSensorRegressions();MossChargerRange();Lifecycle();Console.WriteLine($"PASS world_interactions checks={checks}; corrected scenarios={scenarios}; exact native IL with production hooks; Unity dependencies simulated.");}
 }

@@ -113,7 +113,7 @@ internal static class RescueHint
 		{
 			HideDistant();
 		}
-		if (!queued || s == null || !s.Active || !s.Gameplay || Plugin.Self.Panel || Charms.NativeMenuOpen || PvpMatch.BlocksInput)
+		if (CoopSetupHint.Pending || !queued || s == null || !s.Active || !s.Gameplay || Plugin.Self.Panel || Charms.NativeMenuOpen || PvpMatch.BlocksInput)
 		{
 			return;
 		}

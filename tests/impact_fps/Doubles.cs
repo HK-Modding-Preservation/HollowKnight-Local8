@@ -80,7 +80,7 @@ namespace KO.HollowKnight8 {
  internal static class PerformanceTuning{internal static bool Enabled=>Plugin.Self&&Plugin.Self.PerformanceMode.Value;internal static bool ReduceDamage=>Enabled;}
  internal static class PlayerContext{internal static bool TargetingEnemy;internal static PlayerSlot Current;}
  internal static class Controls{internal static bool LastBlocked;internal static int Pumps;internal static void Pump(PlayerSlot p,bool block){Pumps++;LastBlocked=block;}}
- internal static class ScriptedParty{internal static bool Active;internal static bool Holds(PlayerSlot p)=>p.Scripted;}
+ internal static class ScriptedParty{internal static bool Active,TracksChamber;internal static int NativeMoves;internal static void NativeMove(CoopSession s,PlayerSlot p,UnityEngine.Vector3 from,UnityEngine.Vector3 to){NativeMoves++;}internal static bool Holds(PlayerSlot p)=>p.Scripted;}
  internal static class ChallengeSequence{internal static bool Holds(PlayerSlot p)=>p.Challenge;}
  internal static class BenchSeats{internal static bool Seated(PlayerSlot p)=>p.Bench;internal static bool Custom(PlayerSlot p)=>p.CustomBench;}
  internal static class EmergencyWarp{internal static bool Active(PlayerSlot p)=>p.Warp;}

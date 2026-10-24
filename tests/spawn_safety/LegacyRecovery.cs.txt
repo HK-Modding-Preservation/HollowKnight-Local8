@@ -1,0 +1,9 @@
+internal static bool Recovery(CoopSession s,PlayerSlot p,ref Vector3 at){
+  Physics2D.SyncTransforms();
+  if(s.InRoom(at)&&ClearAt(p,at))return true;
+  var ally=s.LongestLiving(p);Vector3 near;
+  if(ally!=null&&NearAlly(s,ally,p,out near)){at=near;Diagnostics.Write("SPAWN wall fallback P"+(p.Index+1)+" -> "+at);return true;}
+  p.HazardUntil=Time.time+.35f;
+  Diagnostics.Throttled("SPAWN waiting for clear body P"+(p.Index+1),new System.InvalidOperationException("Destination intersects terrain"));
+  return false;
+ }

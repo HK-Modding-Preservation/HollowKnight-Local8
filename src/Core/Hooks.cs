@@ -223,8 +223,11 @@ internal static class Hooks
 			VanillaHud.Install();
 			SkinBridge.Install();
 			ElderBaldurRange.Install();
+			FallingPlatformHazard.Install();
 			MushroomBounceRouting.Install();
 			WorldContactRouting.Install();
+			SoulOrbRouting.Install();
+			Lifeblood.Install();
 			On.InvCharmBackboard.SelectCharm += SelectBoard;
 			On.CharmItem.GetListNumber += SelectEquipped;
 			On.HeroController.FinishedEnteringScene += Entered;
@@ -287,6 +290,8 @@ internal static class Hooks
 			On.GameManager.PlayerDeadFromHazard += PlayerDeadHazard;
 			On.GameManager.SaveGame += SaveGame;
 			On.InputHandler.Update += InputUpdate;
+			ControllerMappingIsolation.Install();
+			RoomWaitVisibility.Install();
 			On.ObjectPool.Spawn_GameObject_Transform_Vector3_Quaternion += PoolSpawn;
 			On.LineOfSightDetector.Update += EnemyUpdate;
 			On.KnightHatchling.FixedUpdate += HatchlingFixed;
@@ -341,8 +346,11 @@ internal static class Hooks
 			VanillaHud.Uninstall();
 			SkinBridge.Uninstall();
 			ElderBaldurRange.Uninstall();
+			FallingPlatformHazard.Uninstall();
 			MushroomBounceRouting.Uninstall();
 			WorldContactRouting.Uninstall();
+			SoulOrbRouting.Uninstall();
+			Lifeblood.Uninstall();
 			On.InvCharmBackboard.SelectCharm -= SelectBoard;
 			On.CharmItem.GetListNumber -= SelectEquipped;
 			On.HeroController.FinishedEnteringScene -= Entered;
@@ -405,6 +413,8 @@ internal static class Hooks
 			On.GameManager.PlayerDeadFromHazard -= PlayerDeadHazard;
 			On.GameManager.SaveGame -= SaveGame;
 			On.InputHandler.Update -= InputUpdate;
+			ControllerMappingIsolation.Uninstall();
+			RoomWaitVisibility.Uninstall();
 			On.ObjectPool.Spawn_GameObject_Transform_Vector3_Quaternion -= PoolSpawn;
 			On.LineOfSightDetector.Update -= EnemyUpdate;
 			On.KnightHatchling.FixedUpdate -= HatchlingFixed;
@@ -692,7 +702,7 @@ internal static class Hooks
 			}
 			if (flag && !flag3 && !playerSlot.Down && !playerSlot.Hazard && session.Gameplay && !self.cState.transitioning && self.damageMode != DamageMode.NO_DAMAGE && !playerSlot.Vitals.Invincible)
 			{
-				session.Hazard(playerSlot);
+				session.Hazard(playerSlot, HazardFeedback.Kind(hazardType), go ? go.transform.rotation.z : 0f);
 			}
 			if (playerSlot.Down || playerSlot.Hazard)
 			{
@@ -700,6 +710,7 @@ internal static class Hooks
 			}
 			if (flag3)
 			{
+				if (flag) HazardFeedback.Play(playerSlot, HazardFeedback.Kind(hazardType), go ? go.transform.rotation.z : 0f);
 				Diagnostics.Write("FATAL HIT P" + (playerSlot.Index + 1) + " amount=" + amount + " hazard=" + hazardType + " hp=" + num);
 				session.Down(playerSlot);
 			}
@@ -920,22 +931,6 @@ internal static class Hooks
 
 	private static void AddSoul(On.HeroController.orig_AddMPCharge orig, HeroController self, int amount)
 	{
-		if (WorldRouting.warp == null && WorldRouting.warpAt.z == 104f && Time.unscaledTime - WorldRouting.warpAt.x < 3f)
-		{
-			object obj = HeroPlayer(self);
-			if (obj != null && ((PlayerSlot)obj).Index == 0)
-			{
-				obj = Session.Players;
-				if ((uint)((List<PlayerSlot>)obj).Count > (uint)(int)WorldRouting.warpAt.y)
-				{
-					obj = ((List<PlayerSlot>)obj)[(int)WorldRouting.warpAt.y];
-					if (obj != null && ((PlayerSlot)obj).Alive)
-					{
-						self = ((PlayerSlot)obj).Hero;
-					}
-				}
-			}
-		}
 		using (PlayerContext.Enter(HeroPlayer(self)))
 		{
 			orig(self, amount);
@@ -988,6 +983,7 @@ internal static class Hooks
 		if (Session != null && Session.Active)
 		{
 			Session.Entered(self);
+			EntryGravityRecovery.Entered(Session, self);
 		}
 	}
 
@@ -1329,11 +1325,12 @@ internal static class Hooks
 		{
 			if (session.Data.health <= 0)
 			{
+				HazardFeedback.Play(playerSlot, type, angle);
 				session.Down(playerSlot);
 			}
 			else
 			{
-				session.Hazard(playerSlot);
+				session.Hazard(playerSlot, type, angle);
 			}
 		}
 		return Empty();
@@ -1725,6 +1722,7 @@ internal static class Hooks
 
 	private static void Spawned(GameObject result)
 	{
+		VanillaHud.Spawned(result, VanillaHud.SpawnSource);
 		SpellSafety.Spawned(result);
 		WeaverlingLifetime.Spawned(result, PlayerContext.Current);
 		NativeDashEffects.Spawned(result);
@@ -1733,14 +1731,20 @@ internal static class Hooks
 
 	private static void SpellPoolAction(On.HutongGames.PlayMaker.Actions.SpawnObjectFromGlobalPool.orig_OnEnter orig, HutongGames.PlayMaker.Actions.SpawnObjectFromGlobalPool self)
 	{
-		SpellSafety.Pool(orig, self);
+		var previous = VanillaHud.SpawnSource;
+		VanillaHud.SpawnSource = self.Fsm?.GameObject;
+		try { SpellSafety.Pool(orig, self); }
+		finally { VanillaHud.SpawnSource = previous; }
 	}
 
 	private static void SpellCreateAction(On.HutongGames.PlayMaker.Actions.CreateObject.orig_OnEnter orig, HutongGames.PlayMaker.Actions.CreateObject self)
 	{
 		SpellSafety.Create(orig, self);
 		if (self.storeObject != null)
+		{
+			VanillaHud.Spawned(self.storeObject.Value, self.Fsm?.GameObject);
 			WeaverlingLifetime.Spawned(self.storeObject.Value, Session?.Resolve(self.Fsm) ?? PlayerContext.Current);
+		}
 	}
 
 	internal static void SpellBorn(GameObject projectile, PlayerSlot caster)
@@ -1803,11 +1807,7 @@ internal static class Hooks
 	private static void EnemyUpdate(On.LineOfSightDetector.orig_Update orig, LineOfSightDetector self)
 	{
 		if (WalkerTargeting.Sight(orig, self)) return;
-		CoopSession session = Session;
-		using (PlayerContext.Enter((session != null && session.Active) ? session.Nearest(self.transform.position) : null, enemy: true))
-		{
-			orig(self);
-		}
+		EnemySightRouting.Update(orig, self);
 	}
 
 	private static void SpellOrb(On.SpellGetOrb.orig_OnEnable orig, SpellGetOrb self)
@@ -1831,7 +1831,7 @@ internal static class Hooks
 		{
 			return session.Primary;
 		}
-		PlayerSlot playerSlot = PickupCard.Resolve(fsm) ?? StagMenuRouting.Resolve(fsm) ?? ShopMenuRouting.Resolve(fsm) ?? session.Resolve(fsm) ?? InteractionRouter.Resolve(fsm) ?? Lifeblood.Resolve(fsm) ?? ArenaGather.Resolve(fsm) ?? WorldRouting.Resolve(fsm);
+		PlayerSlot playerSlot = HornetEncounterFlow.Resolve(fsm) ?? SoulOrbRouting.Resolve(fsm) ?? PickupCard.Resolve(fsm) ?? StagMenuRouting.Resolve(fsm) ?? ShopMenuRouting.Resolve(fsm) ?? session.Resolve(fsm) ?? InteractionRouter.Resolve(fsm) ?? Lifeblood.Resolve(fsm) ?? ArenaGather.Resolve(fsm) ?? WorldRouting.Resolve(fsm);
 		if ((playerSlot == null || (playerSlot.Down && session.Resolve(fsm) == null)) && (bool)fsm.GameObject)
 		{
 			if (!enemies.TryGetValue(fsm, out var value))
@@ -1845,7 +1845,7 @@ internal static class Hooks
 			}
 			if (((bool)value.Health && !value.Health.GetIsDead()) || (bool)value.Damage)
 			{
-				playerSlot = session.Nearest(fsm.GameObject.transform.position);
+				playerSlot = EnemySightRouting.Target(fsm) ?? session.Nearest(fsm.GameObject.transform.position);
 				enemy = true;
 			}
 		}
@@ -1865,10 +1865,6 @@ internal static class Hooks
 				enemy = true;
 			}
 			playerSlot = playerSlot2;
-			if (WorldRouting.warp == null && playerSlot2.Index > 0)
-			{
-				WorldRouting.warpAt = new Vector3(Time.unscaledTime, playerSlot.Index, 104f);
-			}
 		}
 		goto IL_018a;
 		IL_018a:
@@ -1879,6 +1875,11 @@ internal static class Hooks
 	{
 		JumpEffectLifetime.Reset();
 		RoarMotionRecovery.Reset();
+		EntryGravityRecovery.Reset();
+		TerrainEmbedRecovery.Reset();
+		HornetEncounterFlow.Reset();
+		FallingPlatformHazard.Reset();
+		SoulOrbRouting.Reset();
 		InvariantText.Clear();
 		NativeEventSearch.Reset();
 		PartyDeath.Reset();
@@ -1963,10 +1964,12 @@ internal static class Hooks
 
 	private static void StateEnter(On.HutongGames.PlayMaker.FsmState.orig_OnEnter orig, HutongGames.PlayMaker.FsmState self)
 	{
+		SoulOrbRouting.StateEntered(self);
 		ArenaGather.ObserveState(self);
 		CoopEnding.BeforeState(self);
 		bool enemy;
 		PlayerSlot playerSlot = FsmPlayer(self.Fsm, out enemy);
+		HornetEncounterFlow.ObserveState(self, playerSlot);
 		ChallengeSequence.ObserveState(self, playerSlot);
 		SharedAcquisition.ObserveState(self, playerSlot);
 		var previousControlSource = InteractionControlLifecycle.Source;
@@ -2332,7 +2335,7 @@ internal static class Hooks
 	private static void InteractionCall(On.HutongGames.PlayMaker.Actions.CallMethodProper.orig_OnEnter orig, HutongGames.PlayMaker.Actions.CallMethodProper self)
 	{
 		CoopSession session = Session;
-		PlayerSlot playerSlot = ((session != null && session.Active) ? (PickupCard.Resolve(self.Fsm) ?? ShopMenuRouting.Resolve(self.Fsm) ?? InteractionRouter.Resolve(self.Fsm) ?? WorldRouting.Resolve(self.Fsm) ?? PlayerContext.Current) : null);
+		PlayerSlot playerSlot = ((session != null && session.Active) ? (HornetEncounterFlow.Resolve(self.Fsm) ?? PickupCard.Resolve(self.Fsm) ?? ShopMenuRouting.Resolve(self.Fsm) ?? InteractionRouter.Resolve(self.Fsm) ?? WorldRouting.Resolve(self.Fsm) ?? PlayerContext.Current) : null);
 		if (playerSlot != null)
 		{
 			RebindObject(self, playerSlot);
@@ -2421,10 +2424,12 @@ internal static class Hooks
 		}
 		ArenaGather.Contact(self, other);
 		PlayerSlot playerSlot = Lifeblood.Track(self, other);
+		PlayerSlot soulHitter = SoulOrbRouting.Track(self, other);
 		PlayerSlot playerSlot2 = WorldRouting.Touch(self, other, exit: false);
 		bool enemy = false;
 		PlayerSlot playerSlot3 = ((Session == null) ? null : Session.Resolve(self));
-		playerSlot3 = playerSlot3 ?? playerSlot ?? playerSlot2 ?? FsmPlayer(self, out enemy);
+		playerSlot3 = playerSlot3 ?? soulHitter ?? playerSlot ?? playerSlot2 ?? FsmPlayer(self, out enemy);
+		using (SoulOrbRouting.EnterContact(self, soulHitter))
 		using (PlayerContext.Enter(playerSlot3, enemy))
 		{
 			using (CharmNativeUi.Enter(self))
@@ -2454,10 +2459,12 @@ internal static class Hooks
 		}
 		ArenaGather.Contact(self, other);
 		PlayerSlot playerSlot = Lifeblood.Track(self, other);
+		PlayerSlot soulHitter = SoulOrbRouting.Track(self, other);
 		PlayerSlot playerSlot2 = WorldRouting.Touch(self, other, exit: false);
 		bool enemy = false;
 		PlayerSlot playerSlot3 = ((Session == null) ? null : Session.Resolve(self));
-		playerSlot3 = playerSlot3 ?? playerSlot ?? playerSlot2 ?? FsmPlayer(self, out enemy);
+		playerSlot3 = playerSlot3 ?? soulHitter ?? playerSlot ?? playerSlot2 ?? FsmPlayer(self, out enemy);
+		using (SoulOrbRouting.EnterContact(self, soulHitter))
 		using (PlayerContext.Enter(playerSlot3, enemy))
 		{
 			using (CharmNativeUi.Enter(self))

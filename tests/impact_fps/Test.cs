@@ -259,10 +259,10 @@ internal static class Test
             if(n%19==0)at=from;if(n%59==0)at.y=-100;if(n%61==0)at.x=from.x+6;if(n%71==0)at.x=float.NaN;if(n%73==0)at.x=float.PositiveInfinity;if(n%79==0)at.y=float.NegativeInfinity;
             h.transform.position=at;h.controlReqlinquished=random.Next(2)==0;s.Active=random.Next(20)!=0;p.Ready=random.Next(20)!=0;p.Alive=random.Next(20)!=0;gm.GameplayScene=random.Next(20)!=0;gm.IsLoadingSceneTransition=random.Next(20)==0;gm.HasFinishedEnteringScene=random.Next(20)!=0;
             p.ArenaTransfer=random.Next(20)==0;ArenaGather.TransferActive=random.Next(20)==0;p.Warp=random.Next(20)==0;CoopEnding.Active=random.Next(20)==0;ScriptedParty.Active=random.Next(20)==0;p.Bench=random.Next(20)==0;InteractionRouter.Interaction=random.Next(2)==0;s.InBounds=random.Next(2)==0;
-            var call=new WorldRouting.Call{Player=n%89==0?null:p,Previous=outer,Position=from};
+            PlayerContext.Current=n%89==0?null:p;h.transform.position=from;var call=WorldRouting.Begin(f);call.Player=n%89==0?null:p;call.Previous=outer;h.transform.position=at;
             var old=Warp(true,f,call);var now=Warp(false,f,call);Check(old.Equals(now),"live warp decision/feedback/scoped restoration differs at "+n);
         }
-        Reset();s=Plugin.Self.Session;gm=GameManager.instance;p=P();f=new(){Name="No movement"};var call2=new WorldRouting.Call{Player=p,Position=p.Hero.transform.position};
+        Reset();s=Plugin.Self.Session;gm=GameManager.instance;p=P();f=new(){Name="No movement"};PlayerContext.Current=p;var call2=WorldRouting.Begin(f);
         for(int n=0;n<20000;n++)WorldRouting.LegacyEnd(f,call2);int before=gm.WorldChecks;gm.WorldChecks=0;
         for(int n=0;n<20000;n++)WorldRouting.End(f,call2);int after=gm.WorldChecks;
         Check(before==20000&&after==0,"unchanged actors must avoid world/scene checks");
@@ -271,7 +271,26 @@ internal static class Test
     }
     internal static void Main()
     {
-        ParticleFilters();IntroFrames();PulseCleanup();RoarRelease();PhysicsWatchdog();WarpEquivalence();
+        ParticleFilters();IntroFrames();PulseCleanup();RoarRelease();PhysicsWatchdog();WarpEquivalence();LocalRecoveries();
         Console.WriteLine("PASS "+checks+" production impact/motion/warp checks; native Unity integration still requires an in-game trial.");
+    }
+
+    private static void LocalRecoveries()
+    {
+        for(int index=0;index<8;index++)
+        {
+            Reset(8);var s=Plugin.Self.Session;var p=P(index);var f=new Fsm{Name="Native world"};
+            p.Hero.controlReqlinquished=true;PlayerContext.Current=p;
+            WorldRouting.ObserveFrame(s);var outer=WorldRouting.Begin(f);var inner=WorldRouting.Begin(f);
+            WorldRouting.warp=p;WorldRouting.LocalRecovery(p);p.Hero.transform.position=new(40,10);
+            WorldRouting.End(f,inner);WorldRouting.End(f,outer);WorldRouting.ObserveFrame(s);
+            Check(WorldRouting.warp==null,"single-actor recovery was relayed as a group teleport P"+(index+1));
+            var genuine=WorldRouting.Begin(f);p.Hero.transform.position=new(70,10);WorldRouting.End(f,genuine);
+            Check(WorldRouting.warp==p,"local recovery suppressed a later actual native story teleport");
+            var other=P((index+1)%8);WorldRouting.LocalRecovery(other);
+            Check(WorldRouting.warp==p,"another actor's recovery cancelled the current native source");
+            genuine=WorldRouting.Begin(f);WorldRouting.warp=null;p.Hero=new HeroController();p.Hero.controlReqlinquished=true;p.Hero.transform.position=new(90,20);WorldRouting.End(f,genuine);
+            Check(WorldRouting.warp==null,"old callback relayed a replacement hero");
+        }
     }
 }

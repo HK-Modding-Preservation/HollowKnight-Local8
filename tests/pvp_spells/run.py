@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the production spell-duel service, settings and owner-scoped input pump."""
 from pathlib import Path
-import argparse,json,os,shutil,subprocess,tempfile
+import argparse,json,os,re,shutil,subprocess,tempfile
 here=Path(__file__).resolve().parent;root=here.parents[1]
 ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--dotnet',default=os.environ.get('DOTNET','dotnet'));args=ap.parse_args()
 dotnet=shutil.which(args.dotnet) or str(Path(args.dotnet).resolve())
@@ -12,6 +12,10 @@ def method(path,signature):
     while depth:depth+=(text[end]=='{')-(text[end]=='}');end+=1
     return text[start:end]
 host='using System;using UnityEngine;using InControl;namespace KO.HollowKnight8 {internal static class Controls{'+method('src/Core/Controls.cs','internal static void Pump(')+'}internal partial class CoopSession{'+method('src/Core/CoopSession.cs','internal void Commit(')+'}}'
+# Settings references the input-mode constant; selection logic is covered by
+# primary_controller. Import the declaration unchanged rather than its services.
+automatic=re.search(r'internal const string Automatic\s*=\s*[^;]+;', (root/'src/Core/PrimaryController.cs').read_text()).group()
+host+='namespace KO.HollowKnight8 {internal static class PrimaryController {'+automatic+'}}'
 with tempfile.TemporaryDirectory(prefix='hk8-pvp-spells-') as folder:
     out=Path(folder);(out/'Host.cs').write_text(host)
     production=['Features/PvpSpellOnly.cs','Core/Local8Settings.cs','Core/PerformanceConfiguration.cs','Core/PvpKind.cs','Core/PvpRules.cs','Features/PvpArenaRules.cs','Features/PlayerProfileData.cs']

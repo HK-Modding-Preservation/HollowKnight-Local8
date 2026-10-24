@@ -26,7 +26,7 @@ internal static class WorldContactRouting
         if (!contact) return null;
         var hero = contact.GetComponentInParent<HeroController>();
         var p = hero ? Owner(hero) : null;
-        return p != null && p.Hero == hero ? p : null;
+        return p != null && p.Hero == hero && ColliderGeometry.HeroBody(contact, hero) ? p : null;
     }
 
     internal static void Install()
@@ -57,6 +57,8 @@ internal static class WorldContactRouting
         ShadowGateRouting.Uninstall();
         PartySensorOccupancy.Uninstall();
         WalkerTargeting.Uninstall();
+        EnemySightRouting.Reset();
+        ColliderGeometry.Reset();
     }
 
     internal static void Reset()
@@ -65,6 +67,8 @@ internal static class WorldContactRouting
         ShadowGateRouting.Reset();
         PartySensorOccupancy.Reset();
         WalkerTargeting.Reset();
+        EnemySightRouting.Reset();
+        ColliderGeometry.Reset();
     }
 
     internal static void Tick(CoopSession s)

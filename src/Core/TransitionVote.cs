@@ -19,6 +19,10 @@ internal static class TransitionVote
 
 		internal Action Commit;
 
+		internal string EntryGate;
+
+		internal GameObject Door;
+
 		internal bool WasBlocked;
 
 		internal bool WasKinematic;
@@ -136,6 +140,7 @@ internal static class TransitionVote
 
 	internal static bool Gate(CoopSession s, PlayerSlot p, TransitionPoint gate, Collider2D collider, Action original)
 	{
+		if (gate != null && StagTravelRules.SharedRoute(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, gate.targetScene, gate.entryPoint)) return false;
 		if (Holding(p))
 		{
 			return true;
@@ -154,6 +159,7 @@ internal static class TransitionVote
 
 	internal static bool Direct(CoopSession s, PlayerSlot p, GameManager manager, GameManager.SceneLoadInfo info)
 	{
+		if (info != null && StagTravelRules.SharedRoute(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, info.SceneName, info.EntryGateName)) return false;
 		if (Holding(p))
 		{
 			return true;
@@ -166,11 +172,26 @@ internal static class TransitionVote
 		{
 			return false;
 		}
+		var source = InteractionRouter.CompleteRoomEntry(p);
+		GameObject door = Doorways.WaitSource(p, info, source);
 		Add(p, info.SceneName, delegate
 		{
+			// A native door may already have faded before its load was deferred.
+			// That fade is cancelled during the wait, so the actual load must
+			// perform its own normal transition fade again.
+			info.PreventCameraFadeOut = false;
+			info.WaitForSceneTransitionCameraFade = true;
 			manager.BeginSceneTransition(info);
-		});
+		}, info.EntryGateName, door);
 		return true;
+	}
+
+	internal static bool WaitingDoor(GameObject door, string scene, string entry)
+	{
+		if (!door) return false;
+		foreach (Vote vote in votes.Values)
+			if (vote.Door == door && vote.Key == scene && vote.EntryGate == entry) return true;
+		return false;
 	}
 
 	private static bool BossFlow(string scene)
@@ -195,7 +216,7 @@ internal static class TransitionVote
 		return UnityEngine.SceneManagement.SceneManager.GetActiveScene().name.StartsWith("Dream_", StringComparison.OrdinalIgnoreCase);
 	}
 
-	private static void Add(PlayerSlot p, string key, Action commit)
+	private static void Add(PlayerSlot p, string key, Action commit, string entryGate = null, GameObject door = null)
 	{
 		CrystalDashTransit.CaptureVote(p, key);
 		if (votes.ContainsKey(p.Index))
@@ -210,6 +231,8 @@ internal static class TransitionVote
 			At = Time.unscaledTime,
 			Order = nextOrder++,
 			Commit = commit,
+			EntryGate = entryGate,
+			Door = door,
 			WasBlocked = p.InputBlocked,
 			WasKinematic = ((bool)component && component.isKinematic),
 			Gravity = (component ? component.gravityScale : 0f),
@@ -236,6 +259,7 @@ internal static class TransitionVote
 			}
 		}
 		Hide(vote);
+		RoomWaitVisibility.Tick(Plugin.Self.Session);
 		RescueHint.HideDistant();
 		Diagnostics.Write("ROOM WAIT P" + (p.Index + 1) + " vote=" + key + " count=" + votes.Count);
 	}
@@ -291,6 +315,7 @@ internal static class TransitionVote
 	{
 		if (votes.Count == 0)
 		{
+			RoomWaitVisibility.Reset();
 			return;
 		}
 		if (s == null || !s.Active || s.TeamWipe)
@@ -314,6 +339,7 @@ internal static class TransitionVote
 		if (votes.Count == 0)
 		{
 			firstAt = 0f;
+			RoomWaitVisibility.Reset();
 			return;
 		}
 		if (list.Count > 0)
@@ -324,9 +350,11 @@ internal static class TransitionVote
 				firstAt = Mathf.Min(firstAt, value2.At);
 			}
 		}
+		RoomWaitVisibility.Tick(s);
 		if (((bool)GameManager.instance && GameManager.instance.isPaused) || Plugin.Self.Panel)
 		{
 			firstAt += Time.unscaledDeltaTime;
+			foreach (Vote paused in votes.Values) paused.At += Time.unscaledDeltaTime;
 			return;
 		}
 		int num = 0;
@@ -360,6 +388,7 @@ internal static class TransitionVote
 		}
 		List<Vote> list2 = new List<Vote>(votes.Values);
 		votes.Clear();
+		RoomWaitVisibility.Reset();
 		if (vote == null)
 		{
 			return;
@@ -377,7 +406,7 @@ internal static class TransitionVote
 		committing = true;
 		try
 		{
-			winner.Commit();
+			using (PlayerContext.Enter(winner.Player)) winner.Commit();
 		}
 		catch (Exception ex)
 		{
@@ -399,5 +428,6 @@ internal static class TransitionVote
 		firstAt = 0f;
 		nextOrder = 0;
 		committing = false;
+		RoomWaitVisibility.Reset();
 	}
 }

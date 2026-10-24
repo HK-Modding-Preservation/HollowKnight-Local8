@@ -14,6 +14,9 @@ public sealed class PerformanceConfiguration
     public int Detail;
     public int Bloom;
     public bool NormalHitEffects = true;
+    // Personal feedback preferences remain independent of automatic profiles.
+    public bool HazardEffects = true;
+    public bool HudHealthEffects = true;
     public NativeQualityPreference Particles = new NativeQualityPreference();
     public NativeQualityPreference Blur = new NativeQualityPreference();
 
